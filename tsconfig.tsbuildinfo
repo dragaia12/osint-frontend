@@ -1,1 +1,0 @@
-{"root":["./src/OsintApp.tsx","./src/main.tsx","./src/hooks/use-osint-search.ts","./src/integrations/supabase/client.ts","./src/lib/osint-data.ts","./src/types/osint.ts"],"version":"5.9.3"}

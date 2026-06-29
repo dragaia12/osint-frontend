@@ -308,9 +308,9 @@ function buildSearchResult(query: string, rows: DbRow[]): SearchResult {
       name: query,
       confidence_summary: { verified: v, probable: p, candidate: 0 },
     },
-    sections: sections as SearchResult["sections"],
+    sections: sections as unknown as SearchResult["sections"],
     total_results: rows.length,
-    graph: { nodes, edges } as SearchResult["graph"],
+    graph: { nodes, edges } as unknown as SearchResult["graph"],
   };
 }
 
