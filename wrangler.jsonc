@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/wrangler@latest/config-schema.json",
-  "name": "osint-frontend",
+  "name": "datalyra",
   "compatibility_date": "2026-07-01",
 
   // OPTIMISATION / CORRECTIF :
