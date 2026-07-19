@@ -2,18 +2,5 @@
   "$schema": "https://unpkg.com/wrangler@latest/config-schema.json",
   "name": "osint-frontend",
   "compatibility_date": "2026-07-01",
-
-  // OPTIMISATION / CORRECTIF :
-  // Le fallback SPA était géré jusqu'ici par public/_redirects
-  // ("/* /index.html 200"). Depuis le passage de Cloudflare Pages au
-  // moteur "Workers Assets", cette règle rentre en conflit avec la
-  // normalisation interne des URLs (/index.html -> /) et provoque une
-  // boucle de redirection infinie détectée au déploiement :
-  //   "Infinite loop detected in this rule..."
-  // -> On déclare donc le fallback SPA nativement ici, ce qui est la
-  // méthode recommandée par Cloudflare pour les apps React/Vite en mode SPA.
-  "assets": {
-    "directory": "./dist",
-    "not_found_handling": "single-page-application"
-  }
+  "pages_build_output_dir": "./dist"
 }
