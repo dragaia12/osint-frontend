@@ -1,0 +1,12 @@
+REVOKE ALL ON FUNCTION public.has_role(uuid, public.app_role) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.ensure_user_role(text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.set_user_role(uuid, public.app_role) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.update_recherche_result(uuid, jsonb, integer, integer) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.get_admin_stats() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.get_all_users() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.has_role(uuid, public.app_role) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.ensure_user_role(text) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.set_user_role(uuid, public.app_role) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.update_recherche_result(uuid, jsonb, integer, integer) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_admin_stats() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_all_users() TO authenticated, service_role;
