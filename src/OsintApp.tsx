@@ -169,44 +169,6 @@ function SearchView({
 
   return (
     <div className="search-page-container">
-      {/* Sidebar: Catalogue des sources actives */}
-      <aside className="active-tables-sidebar">
-        <div className="sidebar-header">
-          <Database size={16} />
-          <span>Bases actives ({activeTables.length})</span>
-          <button 
-            type="button" 
-            className="sidebar-refresh-btn" 
-            onClick={onRefreshTables} 
-            disabled={tablesLoading}
-            title="Rafraîchir la liste"
-          >
-            ↻
-          </button>
-        </div>
-        <div className="sidebar-list">
-          {tablesLoading ? (
-            <div className="sidebar-status-msg">Chargement...</div>
-          ) : activeTables.length === 0 ? (
-            <div className="sidebar-status-msg">Aucune base active</div>
-          ) : (
-            activeTables.map((t, idx) => {
-              const name = t.name || t.path?.split(/[/\\]/).pop() || `Base ${idx + 1}`;
-              const rowsCount = t.rows !== undefined && t.rows !== null ? Number(t.rows).toLocaleString() : "";
-              return (
-                <div key={idx} className="sidebar-item">
-                  <span className="status-dot-active" />
-                  <div className="sidebar-item-info">
-                    <strong className="sidebar-item-name" title={name}>{name}</strong>
-                    {rowsCount && <span className="sidebar-item-rows">{rowsCount} lignes</span>}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </aside>
-
       {/* Main stage */}
       <section className={`search-stage ${hasActivity ? "search-stage-active" : ""}`} aria-label="Recherche OSINT">
         <div className="search-intro">
