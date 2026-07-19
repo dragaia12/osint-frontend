@@ -1,7 +1,7 @@
 /**
  * use-osint-search.ts — OSINT HUB (Option A : Backend FastAPI)
  * ======================================================================
- * Correction de la récupération des données pour compatibilité backend
+ * Version unifiée et corrigée pour la liaison Frontend -> Backend
  */
 
 import { useState, useRef, useCallback } from "react";
@@ -12,7 +12,7 @@ import type {
 
 const BACKEND_URL: string =
   (import.meta as unknown as { env: Record<string, string> }).env?.VITE_OSINT_BACKEND_URL
-  ?? "http://127.0.0.1:8765"; // Par défaut vers ton serveur local
+  ?? "http://127.0.0.1:8765";
 
 async function apiFetch(path: string, options?: RequestInit): Promise<Response> {
   const { data } = await supabase.auth.getSession();
@@ -118,33 +118,59 @@ export function useSearch(): UseSearchReturn {
   const [state, setState] = useState<SearchState>(INITIAL);
   const cancelRef = useRef(false);
 
+  const cancelSearch = useCallback(() => {
+    cancelRef.current = true;
+    setState(prev => ({ ...prev, inProgress: false }));
+  }, []);
+
+  const reset = useCallback(() => {
+    cancelRef.current = true;
+    setState(INITIAL);
+  }, []);
+
   const startSearch = useCallback((query: string, _strategy: SearchStrategy) => {
     if (query.trim().length < 3) return;
     cancelRef.current = false;
-    setState(prev => ({ ...prev, inProgress: true, progress: 20 }));
+    setState(prev => ({ ...prev, inProgress: true, progress: 20, progressLabel: "Recherche en cours..." }));
 
     (async () => {
       try {
-        const res = await apiFetch(`/search?q=${encodeURIComponent(query.trim())}`);
+        const encodedQuery = encodeURIComponent(query.trim());
+        let res = await apiFetch(`/search?q=${encodedQuery}`);
+        
+        if (!res.ok || res.status === 404) {
+          res = await apiFetch(`/api/search?query=${encodedQuery}`);
+        }
+        
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         
         const data = await res.json();
+        console.log("DONNÉES REÇUES DU BACKEND :", data); //[cite: 2] Visible dans la console F12 du navigateur
         
-        // Logique de détection flexible ajoutée ici
         const rawResults = data.results || data.data || (Array.isArray(data) ? data : []);
-        
         const result = buildSearchResult(query.trim(), rawResults);
 
+        if (cancelRef.current) return;
+
         setState(prev => ({
-          ...prev, inProgress: false, progress: 100,
+          ...prev,
+          inProgress: false,
+          progress: 100,
           progressLabel: `${rawResults.length} résultat(s) trouvés`,
           result,
         }));
-      } catch (err) {
-        setState(prev => ({ ...prev, inProgress: false, errors: [{ tool: "local", message: "Erreur API", status: "error" }] }));
+      } catch (err: unknown) {
+        if (cancelRef.current) return;
+        const message = err instanceof Error ? err.message : "Erreur de liaison API";
+        console.error("ERREUR FRONTEND:", message);
+        setState(prev => ({
+          ...prev,
+          inProgress: false,
+          errors: [{ tool: "local", message, status: "error" }]
+        }));
       }
     })();
   }, []);
 
-  return { ...state, startSearch, cancelSearch: () => {}, reset: () => {} };
+  return { ...state, startSearch, cancelSearch, reset };
 }
