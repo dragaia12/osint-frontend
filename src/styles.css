@@ -400,23 +400,14 @@ button, input, select { font: inherit; }
 }
 .graph-btn:hover { border-color: var(--gold); color: var(--gold); }
 
-/* ── Search page layout with sidebar ── */
+/* ── Search page layout ── */
 .search-page-container {
-  display: flex;
-  gap: 2rem;
   max-width: 82rem;
   margin: 0 auto;
   padding: 0 1.5rem;
 }
 
-.search-page-container .search-stage {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  padding-inline: 0;
-}
-
-/* ── Sidebar active databases ── */
+/* ── Sidebar active databases (inutilisé, conservé pour référence) ── */
 .active-tables-sidebar {
   width: 18rem;
   flex-shrink: 0;
@@ -742,8 +733,6 @@ button, input, select { font: inherit; }
 /* ── Responsive adjustments ── */
 @media (max-width: 900px) {
   .search-page-container {
-    flex-direction: column;
-    gap: 0;
     padding-inline: 0.8rem;
   }
   .active-tables-sidebar {
@@ -751,8 +740,5 @@ button, input, select { font: inherit; }
   }
   .mobile-active-tables {
     display: block;
-  }
-  .search-page-container .search-stage {
-    padding-top: 2rem;
   }
 }
