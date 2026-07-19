@@ -76,11 +76,52 @@ function exportResult(result: SearchResult, format: "csv" | "md") {
 }
 
 /* ─── Search View ─────────────────────────────────────────────────────────── */
-function SearchView({ strategy, setStrategy }: { strategy: SearchStrategy; setStrategy: (s: SearchStrategy) => void }) {
+function getSourceBadgeClass(source: string) {
+  const s = source.toLowerCase();
+  if (s.includes("leak") || s.includes("breach") || s.includes("db") || s.includes("comb") || s.includes("hacked")) {
+    return "source-badge-leak";
+  }
+  if (s.includes("log") || s.includes("system") || s.includes("apache") || s.includes("nginx") || s.includes("audit") || s.includes("auth")) {
+    return "source-badge-log";
+  }
+  return "source-badge-other";
+}
+
+function getRowType(item: any) {
+  if (item.email) return "Email";
+  if (item.username) return "Identifiant";
+  if (item.ip) return "IP";
+  if (item.subdomain || item.domain) return "Domaine";
+  if (item.note && /^\+?[\d\s-]{6,15}$/.test(item.note)) return "Téléphone";
+  if (item.hash_val || item.hash) return "Hash";
+  return "Autre";
+}
+
+function getRowValue(item: any) {
+  return item.email || item.username || item.ip || item.subdomain || item.domain || item.note || item.hash_val || item.hash || "—";
+}
+
+/* ─── Search View ─────────────────────────────────────────────────────────── */
+function SearchView({ 
+  strategy, 
+  setStrategy,
+  activeTables,
+  tablesLoading,
+  onRefreshTables
+}: { 
+  strategy: SearchStrategy; 
+  setStrategy: (s: SearchStrategy) => void;
+  activeTables: any[];
+  tablesLoading: boolean;
+  onRefreshTables: () => void;
+}) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<TrustLevel | "ALL">("ALL");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const search = useOsintSearch();
+  const [localFilter, setLocalFilter] = useState("");
+  const [viewMode, setViewMode] = useState<"table" | "sections">("table");
+  
+  const search = useOsintSearch(); // uses the migrated backend hook
   const detected = query.trim() ? detectType(query) : "";
   const hasActivity = search.inProgress || Boolean(search.result);
   const searchStartRef = useRef<number>(0);
@@ -88,16 +129,16 @@ function SearchView({ strategy, setStrategy }: { strategy: SearchStrategy; setSt
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
-    if (!query.trim() || search.inProgress) return;
+    if (query.trim().length < 3 || search.inProgress) return;
     searchStartRef.current = Date.now();
     savedRef.current = "";
     search.startSearch(query.trim(), strategy);
     setCollapsed(new Set());
     setFilter("ALL");
+    setLocalFilter("");
   };
 
-  // CORRIGÉ : persiste la recherche dans Supabase quand elle se termine
-  // (alimente le dashboard + l'historique, qui restaient à 0 avant).
+  // Persiste la recherche dans Supabase quand elle se termine
   useEffect(() => {
     if (!search.result || search.inProgress) return;
     if (savedRef.current === search.result.query) return; // déjà sauvegardé
@@ -106,145 +147,287 @@ function SearchView({ strategy, setStrategy }: { strategy: SearchStrategy; setSt
     saveSearchResult(search.result as SearchResult, duration).catch(() => { /* silencieux */ });
   }, [search.result, search.inProgress]);
 
+  const allItems = useMemo(() => {
+    if (!search.result) return [];
+    return search.result.sections.flatMap((s: any) => s.items);
+  }, [search.result]);
+
+  const filteredItems = useMemo(() => {
+    return allItems.filter((item: any) => {
+      const matchTrust = filter === "ALL" || item.trust_level === filter;
+      if (!matchTrust) return false;
+
+      if (!localFilter.trim()) return true;
+      const q = localFilter.toLowerCase().trim();
+      const val = getRowValue(item).toLowerCase();
+      const src = (item.source_data || item.platform || "").toLowerCase();
+      const raw = (item.raw || "").toLowerCase();
+      const type = getRowType(item).toLowerCase();
+      return val.includes(q) || src.includes(q) || raw.includes(q) || type.includes(q);
+    });
+  }, [allItems, localFilter, filter]);
+
   return (
-    <section className={`search-stage ${hasActivity ? "search-stage-active" : ""}`} aria-label="Recherche OSINT">
-      <div className="search-intro">
-        <span className="eyebrow"><span className="status-dot" /> Moteur d'investigation opérationnel</span>
-        <h1>Révélez les connexions.<br /><span>Suivez chaque signal.</span></h1>
-        <p>Un point d'entrée unique pour interroger emails, identités, domaines, adresses IP et empreintes numériques.</p>
-      </div>
+    <div className="search-page-container">
+      {/* Main stage */}
+      <section className={`search-stage ${hasActivity ? "search-stage-active" : ""}`} aria-label="Recherche OSINT">
+        <div className="search-intro">
+          <span className="eyebrow"><span className="status-dot" /> Moteur d'investigation opérationnel</span>
+          <h1>Révélez les connexions.<br /><span>Suivez chaque signal.</span></h1>
+          <p>Un point d'entrée unique pour interroger emails, identités, domaines, adresses IP et empreintes numériques.</p>
+        </div>
 
-      <form className="search-shell" onSubmit={submit}>
-        <Search aria-hidden="true" />
-        <label className="sr-only" htmlFor="osint-query">Cible à analyser</label>
-        <input
-          id="osint-query" value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Email, username, IP, domaine, téléphone…"
-          autoComplete="off"
-        />
-        {detected && <span className="detect-pill">{detected}</span>}
-        <button type="submit" className="btn btn-gold btn-lg" disabled={!query.trim() || search.inProgress}>
-          {search.inProgress ? "Analyse…" : "Rechercher"}
-        </button>
-      </form>
-
-      <div className="search-options">
-        <label htmlFor="strategy"><Settings2 /> Stratégie</label>
-        <select id="strategy" value={strategy} onChange={(e) => setStrategy(e.target.value as SearchStrategy)}>
-          {Object.entries(strategyLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-        {search.inProgress && (
-          <button className="btn btn-glass btn-sm" onClick={search.cancelSearch}>Arrêter</button>
-        )}
-      </div>
-
-      {hasActivity && (
-        <div className="results-flow">
-          <div className="progress-glass" aria-live="polite">
-            <div className="progress-header">
-              <span>{search.progressLabel || "Initialisation des modules"}</span>
-              <strong>{search.progress}%</strong>
+        {/* Mobile active tables dropdown */}
+        <div className="mobile-active-tables">
+          <details>
+            <summary>
+              <Database size={14} />
+              <span>Bases chargées ({activeTables.length})</span>
+            </summary>
+            <div className="mobile-tables-list">
+              {activeTables.map((t, idx) => {
+                const name = t.name || t.path?.split(/[/\\]/).pop() || `Base ${idx + 1}`;
+                return (
+                  <div key={idx} className="mobile-table-item">
+                    <span className="status-dot-active" />
+                    <span>{name}</span>
+                  </div>
+                );
+              })}
             </div>
-            <div className="progress-track"><span style={{ width: `${search.progress}%` }} /></div>
-            {Object.keys(search.toolChips).length > 0 && (
-              <div className="tool-stream">
-                {Object.entries(search.toolChips).map(([tool, status]) => (
-                  <span key={tool} data-status={status}>{normalizeName(tool)}</span>
-                ))}
+          </details>
+        </div>
+
+        <form className="search-shell" onSubmit={submit}>
+          <Search aria-hidden="true" />
+          <label className="sr-only" htmlFor="osint-query">Cible à analyser</label>
+          <input
+            id="osint-query" value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Email, username, IP, domaine, téléphone… (min 3 car.)"
+            autoComplete="off"
+          />
+          {detected && <span className="detect-pill">{detected}</span>}
+          <button type="submit" className="btn btn-gold btn-lg" disabled={query.trim().length < 3 || search.inProgress}>
+            {search.inProgress ? "Analyse…" : "Rechercher"}
+          </button>
+        </form>
+
+        <div className="search-options">
+          <label htmlFor="strategy"><Settings2 /> Stratégie</label>
+          <select id="strategy" value={strategy} onChange={(e) => setStrategy(e.target.value as SearchStrategy)}>
+            {Object.entries(strategyLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          {search.inProgress && (
+            <button className="btn btn-glass btn-sm" onClick={search.cancelSearch}>Arrêter</button>
+          )}
+        </div>
+
+        {hasActivity && (
+          <div className="results-flow">
+            <div className="progress-glass" aria-live="polite">
+              <div className="progress-header">
+                <span>{search.progressLabel || "Initialisation des modules"}</span>
+                <strong>{search.progress}%</strong>
+              </div>
+              <div className="progress-track"><span style={{ width: `${search.progress}%` }} /></div>
+              {Object.keys(search.toolChips).length > 0 && (
+                <div className="tool-stream">
+                  {Object.entries(search.toolChips).map(([tool, status]) => (
+                    <span key={tool} data-status={status}>{normalizeName(tool)}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {search.errors.length > 0 && (
+              <div className="error-glass">
+                <TriangleAlert />
+                <div>
+                  <strong>{search.errors.length} module(s) indisponible(s)</strong>
+                  <p>{search.errors.map((e: any) => `${normalizeName(e.tool)} : ${e.message}`).join(" · ")}</p>
+                </div>
+              </div>
+            )}
+
+            {search.result?.identity_card && (
+              <article className="result-window identity-window">
+                <header>
+                  <div className="module-icon">ID</div>
+                  <div>
+                    <h2>Identité numérique</h2>
+                    <p>Profil consolidé à partir des sources corrélées</p>
+                  </div>
+                  <TrustBadge level={(search.result.identity_card.confidence_summary?.verified ?? 0) > 0 ? "VERIFIED" : "PROBABLE"} />
+                </header>
+                <div className="identity-content">
+                  <div className="id-main">
+                    <span className="id-label">Cible analysée</span>
+                    <strong className="id-name">{search.result.identity_card.name || search.result.query}</strong>
+                  </div>
+                  <div className="confidence-grid">
+                    <span><b>{search.result.identity_card.confidence_summary?.verified ?? 0}</b> vérifiés</span>
+                    <span><b>{search.result.identity_card.confidence_summary?.probable ?? 0}</b> probables</span>
+                    <span><b>{search.result.identity_card.confidence_summary?.candidate ?? 0}</b> candidats</span>
+                  </div>
+                </div>
+              </article>
+            )}
+
+            {search.result && (
+              <div className="result-controls-bar">
+                <div className="view-mode-toggle">
+                  <button 
+                    type="button"
+                    className={`btn btn-sm ${viewMode === "table" ? "btn-gold" : "btn-glass"}`} 
+                    onClick={() => setViewMode("table")}
+                  >
+                    Vue Tableau
+                  </button>
+                  <button 
+                    type="button"
+                    className={`btn btn-sm ${viewMode === "sections" ? "btn-gold" : "btn-glass"}`} 
+                    onClick={() => setViewMode("sections")}
+                  >
+                    Vue Groupée
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* AFFICHE LE TABLEAU DE RESULTAT UNIFIE AVEC FILTRAGE ET BADGES */}
+            {search.result && viewMode === "table" && (
+              <article className="result-window">
+                <div className="window-header" style={{ borderBottom: "1px solid var(--border)", cursor: "default" }}>
+                  <div className="module-icon">📋</div>
+                  <div>
+                    <h2>Tous les signaux</h2>
+                    <p>{filteredItems.length} affiché(s) sur {allItems.length} signaux trouvés</p>
+                  </div>
+                </div>
+
+                <div className="table-filter-bar">
+                  <Search size={14} className="filter-icon" />
+                  <input 
+                    type="text" 
+                    placeholder="Filtrer ces résultats localement (source, valeur, type...)" 
+                    value={localFilter}
+                    onChange={(e) => setLocalFilter(e.target.value)}
+                    className="local-filter-input"
+                  />
+                  {localFilter && (
+                    <button type="button" className="clear-filter-btn" onClick={() => setLocalFilter("")}>
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                <div className="table-wrapper">
+                  <table className="modern-table">
+                    <thead>
+                      <tr>
+                        <th>Source</th>
+                        <th>Type</th>
+                        <th>Cible / Valeur</th>
+                        <th>Confiance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredItems.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="table-empty">
+                            Aucun signal ne correspond aux critères de recherche locale.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredItems.map((item: any, idx: number) => {
+                          const src = item.source_data || item.platform || "Inconnue";
+                          const badgeClass = getSourceBadgeClass(src);
+                          const typeLabel = getRowType(item);
+                          const val = getRowValue(item);
+                          return (
+                            <tr key={idx}>
+                              <td>
+                                <span className={`source-badge ${badgeClass}`}>{src}</span>
+                              </td>
+                              <td className="cell-type">{typeLabel}</td>
+                              <td className="cell-value">
+                                {item.url ? (
+                                  <a href={item.url} target="_blank" rel="noreferrer">{val}</a>
+                                ) : (
+                                  <span>{val}</span>
+                                )}
+                              </td>
+                              <td>
+                                <TrustBadge level={item.trust_level || "CANDIDATE"} />
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </article>
+            )}
+
+            {/* AFFICHE LA VUE GROUPEE D'ORIGINE */}
+            {viewMode === "sections" && search.result?.sections.map((section: any, idx: number) => {
+              const items = section.items.filter((item: any) => filter === "ALL" || item.trust_level === filter);
+              if (!items.length) return null;
+              const isCollapsed = collapsed.has(section.label);
+              return (
+                <article className="result-window" key={section.label} style={{ animationDelay: `${120 + idx * 90}ms` }}>
+                  <button
+                    className="window-header"
+                    onClick={() => setCollapsed((cur) => { const n = new Set(cur); n.has(section.label) ? n.delete(section.label) : n.add(section.label); return n; })}
+                    aria-expanded={!isCollapsed}
+                  >
+                    <div className="module-icon">{section.icon || "◎"}</div>
+                    <div>
+                      <h2>{section.label}</h2>
+                      <p>{items.length} signal{items.length > 1 ? "aux" : ""} corrélé{items.length > 1 ? "s" : ""}</p>
+                    </div>
+                    <ChevronDown className={isCollapsed ? "collapsed" : ""} />
+                  </button>
+                  {!isCollapsed && (
+                    <div className="window-list">
+                      {items.map((item: any, i: number) => <ResultRow key={`${section.label}-${i}`} item={item} />)}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+
+            {search.result?.graph && <GraphView graph={search.result.graph} />}
+
+            {search.result && (
+              <div className="result-actions">
+                <div className="filter-group">
+                  {(["ALL", "VERIFIED", "PROBABLE", "CANDIDATE"] as const).map((level) => (
+                    <button
+                      key={level}
+                      className={`btn btn-sm ${filter === level ? "btn-gold" : "btn-glass"}`}
+                      onClick={() => setFilter(level)}
+                    >
+                      {level === "ALL" ? "Tous" : level}
+                    </button>
+                  ))}
+                </div>
+                <div>
+                  <button className="btn btn-glass" onClick={() => exportResult(search.result as SearchResult, "csv")}>
+                    <Download /> CSV
+                  </button>
+                  <button className="btn btn-glass" style={{ marginLeft: ".5rem" }} onClick={() => exportResult(search.result as SearchResult, "md")}>
+                    <Download /> Obsidian
+                  </button>
+                </div>
               </div>
             )}
           </div>
-
-          {search.errors.length > 0 && (
-            <div className="error-glass">
-              <TriangleAlert />
-              <div>
-                <strong>{search.errors.length} module(s) indisponible(s)</strong>
-                <p>{search.errors.map((e) => `${normalizeName(e.tool)} : ${e.message}`).join(" · ")}</p>
-              </div>
-            </div>
-          )}
-
-          {search.result?.identity_card && (
-            <article className="result-window identity-window">
-              <header>
-                <div className="module-icon">ID</div>
-                <div>
-                  <h2>Identité numérique</h2>
-                  <p>Profil consolidé à partir des sources corrélées</p>
-                </div>
-                <TrustBadge level={(search.result.identity_card.confidence_summary?.verified ?? 0) > 0 ? "VERIFIED" : "PROBABLE"} />
-              </header>
-              <div className="identity-content">
-                <div className="id-main">
-                  <span className="id-label">Cible analysée</span>
-                  <strong className="id-name">{search.result.identity_card.name || search.result.query}</strong>
-                </div>
-                <div className="confidence-grid">
-                  <span><b>{search.result.identity_card.confidence_summary?.verified ?? 0}</b> vérifiés</span>
-                  <span><b>{search.result.identity_card.confidence_summary?.probable ?? 0}</b> probables</span>
-                  <span><b>{search.result.identity_card.confidence_summary?.candidate ?? 0}</b> candidats</span>
-                </div>
-              </div>
-            </article>
-          )}
-
-          {search.result?.sections.map((section, idx) => {
-            const items = section.items.filter((item) => filter === "ALL" || item.trust_level === filter);
-            if (!items.length) return null;
-            const isCollapsed = collapsed.has(section.label);
-            return (
-              <article className="result-window" key={section.label} style={{ animationDelay: `${120 + idx * 90}ms` }}>
-                <button
-                  className="window-header"
-                  onClick={() => setCollapsed((cur) => { const n = new Set(cur); n.has(section.label) ? n.delete(section.label) : n.add(section.label); return n; })}
-                  aria-expanded={!isCollapsed}
-                >
-                  <div className="module-icon">{section.icon || "◎"}</div>
-                  <div>
-                    <h2>{section.label}</h2>
-                    <p>{items.length} signal{items.length > 1 ? "aux" : ""} corrélé{items.length > 1 ? "s" : ""}</p>
-                  </div>
-                  <ChevronDown className={isCollapsed ? "collapsed" : ""} />
-                </button>
-                {!isCollapsed && (
-                  <div className="window-list">
-                    {items.map((item, i) => <ResultRow key={`${section.label}-${i}`} item={item} />)}
-                  </div>
-                )}
-              </article>
-            );
-          })}
-
-          {search.result?.graph && <GraphView graph={search.result.graph} />}
-
-          {search.result && (
-            <div className="result-actions">
-              <div className="filter-group">
-                {(["ALL", "VERIFIED", "PROBABLE", "CANDIDATE"] as const).map((level) => (
-                  <button
-                    key={level}
-                    className={`btn btn-sm ${filter === level ? "btn-gold" : "btn-glass"}`}
-                    onClick={() => setFilter(level)}
-                  >
-                    {level === "ALL" ? "Tous" : level}
-                  </button>
-                ))}
-              </div>
-              <div>
-                <button className="btn btn-glass" onClick={() => exportResult(search.result as SearchResult, "csv")}>
-                  <Download /> CSV
-                </button>
-                <button className="btn btn-glass" style={{ marginLeft: ".5rem" }} onClick={() => exportResult(search.result as SearchResult, "md")}>
-                  <Download /> Obsidian
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </section>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -1193,6 +1376,29 @@ export function OsintApp() {
   const [strategy, setStrategy] = useState<SearchStrategy>("balanced");
   const [menuOpen, setMenuOpen] = useState(false);
   const [recoveryMode, setRecoveryMode] = useState(false);
+  const [activeTables, setActiveTables] = useState<any[]>([]);
+  const [tablesLoading, setTablesLoading] = useState(false);
+
+  const fetchActiveTables = async () => {
+    setTablesLoading(true);
+    try {
+      let res = await apiFetch("/api/tables");
+      if (!res.ok) {
+        res = await apiFetch("/databases");
+      }
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) 
+          ? data 
+          : (data.tables || data.databases || []).map((t: any) => typeof t === "string" ? { name: t } : t);
+        setActiveTables(list);
+      }
+    } catch (err) {
+      console.warn("Échec du chargement du catalogue des sources:", err);
+    } finally {
+      setTablesLoading(false);
+    }
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
@@ -1211,6 +1417,12 @@ export function OsintApp() {
     });
     return () => data.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      fetchActiveTables();
+    }
+  }, [user]);
 
   const nav = useMemo(() => [
     { id: "search" as const, label: "Recherche", icon: <Search /> },
@@ -1258,7 +1470,15 @@ export function OsintApp() {
       </header>
 
       <main>
-        {view === "search" && <SearchView strategy={strategy} setStrategy={setStrategy} />}
+        {view === "search" && (
+          <SearchView 
+            strategy={strategy} 
+            setStrategy={setStrategy} 
+            activeTables={activeTables}
+            tablesLoading={tablesLoading}
+            onRefreshTables={fetchActiveTables}
+          />
+        )}
         {view === "dashboard" && <DashboardView />}
         {view === "dossiers" && <DossiersView />}
         {view === "databases" && <DatabasesView />}
