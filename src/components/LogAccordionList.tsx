@@ -7,7 +7,6 @@ interface LogAccordionListProps {
 }
 
 export default function LogAccordionList({ title, items }: LogAccordionListProps) {
-  // Utilisation d'un Set pour permettre l'ouverture de plusieurs accordéons en même temps
   const [openIndices, setOpenIndices] = useState<Set<number>>(new Set());
 
   const toggle = (index: number) => {
@@ -125,7 +124,7 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
 
                       {item.lastname && (
                         <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: "6px" }}>
-                          <span style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" -->
+                          <span style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" }}>
                             <User size={12} /> NOM
                           </span>
                           <span>{item.lastname}</span>
@@ -172,7 +171,6 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                     {/* Affichage automatique et dynamique de TOUTES les autres propriétés présentes dans l'objet */}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "8px", marginTop: "4px", borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: "8px" }}>
                       {Object.entries(item).map(([key, value]) => {
-                        // On exclut les clés déjà affichées au-dessus ou techniques pour éviter les doublons
                         if (["email", "password", "firstname", "lastname", "phone", "address", "siret", "domain", "source", "source_data", "platform", "raw", "trust_level"].includes(key)) return null;
                         if (value === null || value === undefined || value === "" || value === false) return null;
                         
