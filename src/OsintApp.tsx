@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import LogAccordionList from "./components/LogAccordionList";
 import {
   ChevronDown, CircleUserRound, Database, Download,
   FolderKanban, Gauge, HardDrive, LogOut, Menu, Plus, Search, Settings2,
@@ -11,6 +10,7 @@ import {
   getDossiers, removeDossier, saveSearchResult, toggleDossier,
 } from "@/lib/osint-data";
 import { useSearch as useOsintSearch } from "@/hooks/use-osint-search";
+import LogAccordionList from "./components/LogAccordionList";
 import type { Dossier, Graph, GraphNode, GraphEdge, ResultItem, SearchResult, SearchStrategy, TrustLevel, UserRole } from "@/types/osint";
 
 type View = "search" | "dashboard" | "dossiers" | "databases" | "admin";
@@ -120,9 +120,9 @@ function SearchView({
   const [filter, setFilter] = useState<TrustLevel | "ALL">("ALL");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [localFilter, setLocalFilter] = useState("");
-  const [viewMode, setViewMode] = useState<"table" | "sections" | "accordion">("accordion"); // Par défaut sur accordéon ou table
+  const [viewMode, setViewMode] = useState<"table" | "sections" | "accordion">("accordion");
   
-  const search = useOsintSearch(); // uses the migrated backend hook
+  const search = useOsintSearch();
   const detected = query.trim() ? detectType(query) : "";
   const hasActivity = search.inProgress || Boolean(search.result);
   const searchStartRef = useRef<number>(0);
@@ -139,13 +139,12 @@ function SearchView({
     setLocalFilter("");
   };
 
-  // Persiste la recherche dans Supabase quand elle se termine
   useEffect(() => {
     if (!search.result || search.inProgress) return;
-    if (savedRef.current === search.result.query) return; // déjà sauvegardé
+    if (savedRef.current === search.result.query) return;
     savedRef.current = search.result.query;
     const duration = Date.now() - searchStartRef.current;
-    saveSearchResult(search.result as SearchResult, duration).catch(() => { /* silencieux */ });
+    saveSearchResult(search.result as SearchResult, duration).catch(() => {});
   }, [search.result, search.inProgress]);
 
   const allItems = useMemo(() => {
@@ -170,7 +169,6 @@ function SearchView({
 
   return (
     <div className="search-page-container">
-      {/* Main stage */}
       <section className={`search-stage ${hasActivity ? "search-stage-active" : ""}`} aria-label="Recherche OSINT">
         <div className="search-intro">
           <span className="eyebrow"><span className="status-dot" /> Moteur d'investigation opérationnel</span>
@@ -178,7 +176,6 @@ function SearchView({
           <p>Un point d'entrée unique pour interroger emails, identités, domaines, adresses IP et empreintes numériques.</p>
         </div>
 
-        {/* Mobile active tables dropdown */}
         <div className="mobile-active-tables">
           <details>
             <summary>
@@ -303,7 +300,6 @@ function SearchView({
               </div>
             )}
 
-            {/* AFFICHE LE TABLEAU DE RESULTAT UNIFIE */}
             {search.result && viewMode === "table" && (
               <article className="result-window">
                 <div className="window-header" style={{ borderBottom: "1px solid var(--border)", cursor: "default" }}>
@@ -379,7 +375,6 @@ function SearchView({
               </article>
             )}
 
-            {/* AFFICHE LA VUE ACCORDÉON INTERACTIVE */}
             {search.result && viewMode === "accordion" && (
               <div style={{ marginTop: "1rem" }}>
                 <LogAccordionList
@@ -395,7 +390,6 @@ function SearchView({
               </div>
             )}
 
-            {/* AFFICHE LA VUE GROUPEE D'ORIGINE */}
             {viewMode === "sections" && search.result?.sections.map((section: any, idx: number) => {
               const items = section.items.filter((item: any) => filter === "ALL" || item.trust_level === filter);
               if (!items.length) return null;
@@ -454,299 +448,6 @@ function SearchView({
     </div>
   );
 }
-  // Persiste la recherche dans Supabase quand elle se termine
-  useEffect(() => {
-    if (!search.result || search.inProgress) return;
-    if (savedRef.current === search.result.query) return; // déjà sauvegardé
-    savedRef.current = search.result.query;
-    const duration = Date.now() - searchStartRef.current;
-    saveSearchResult(search.result as SearchResult, duration).catch(() => { /* silencieux */ });
-  }, [search.result, search.inProgress]);
-
-  const allItems = useMemo(() => {
-    if (!search.result) return [];
-    return search.result.sections.flatMap((s: any) => s.items);
-  }, [search.result]);
-
-  const filteredItems = useMemo(() => {
-    return allItems.filter((item: any) => {
-      const matchTrust = filter === "ALL" || item.trust_level === filter;
-      if (!matchTrust) return false;
-
-      if (!localFilter.trim()) return true;
-      const q = localFilter.toLowerCase().trim();
-      const val = getRowValue(item).toLowerCase();
-      const src = (item.source_data || item.platform || "").toLowerCase();
-      const raw = (item.raw || "").toLowerCase();
-      const type = getRowType(item).toLowerCase();
-      return val.includes(q) || src.includes(q) || raw.includes(q) || type.includes(q);
-    });
-  }, [allItems, localFilter, filter]);
-
-  return (
-    <div className="search-page-container">
-      {/* Main stage */}
-      <section className={`search-stage ${hasActivity ? "search-stage-active" : ""}`} aria-label="Recherche OSINT">
-        <div className="search-intro">
-          <span className="eyebrow"><span className="status-dot" /> Moteur d'investigation opérationnel</span>
-          <h1>Révélez les connexions.<br /><span>Suivez chaque signal.</span></h1>
-          <p>Un point d'entrée unique pour interroger emails, identités, domaines, adresses IP et empreintes numériques.</p>
-        </div>
-
-        {/* Mobile active tables dropdown */}
-        <div className="mobile-active-tables">
-          <details>
-            <summary>
-              <Database size={14} />
-              <span>Bases chargées ({activeTables.length})</span>
-            </summary>
-            <div className="mobile-tables-list">
-              {activeTables.map((t, idx) => {
-                const name = t.name || t.path?.split(/[/\\]/).pop() || `Base ${idx + 1}`;
-                return (
-                  <div key={idx} className="mobile-table-item">
-                    <span className="status-dot-active" />
-                    <span>{name}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </details>
-        </div>
-
-        <form className="search-shell" onSubmit={submit}>
-          <Search aria-hidden="true" />
-          <label className="sr-only" htmlFor="osint-query">Cible à analyser</label>
-          <input
-            id="osint-query" value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Email, username, IP, domaine, téléphone… (min 3 car.)"
-            autoComplete="off"
-          />
-          {detected && <span className="detect-pill">{detected}</span>}
-          <button type="submit" className="btn btn-gold btn-lg" disabled={query.trim().length < 3 || search.inProgress}>
-            {search.inProgress ? "Analyse…" : "Rechercher"}
-          </button>
-        </form>
-
-        <div className="search-options">
-          <label htmlFor="strategy"><Settings2 /> Stratégie</label>
-          <select id="strategy" value={strategy} onChange={(e) => setStrategy(e.target.value as SearchStrategy)}>
-            {Object.entries(strategyLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
-          {search.inProgress && (
-            <button className="btn btn-glass btn-sm" onClick={search.cancelSearch}>Arrêter</button>
-          )}
-        </div>
-
-        {hasActivity && (
-          <div className="results-flow">
-            <div className="progress-glass" aria-live="polite">
-              <div className="progress-header">
-                <span>{search.progressLabel || "Initialisation des modules"}</span>
-                <strong>{search.progress}%</strong>
-              </div>
-              <div className="progress-track"><span style={{ width: `${search.progress}%` }} /></div>
-              {Object.keys(search.toolChips).length > 0 && (
-                <div className="tool-stream">
-                  {Object.entries(search.toolChips).map(([tool, status]) => (
-                    <span key={tool} data-status={status}>{normalizeName(tool)}</span>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {search.errors.length > 0 && (
-              <div className="error-glass">
-                <TriangleAlert />
-                <div>
-                  <strong>{search.errors.length} module(s) indisponible(s)</strong>
-                  <p>{search.errors.map((e: any) => `${normalizeName(e.tool)} : ${e.message}`).join(" · ")}</p>
-                </div>
-              </div>
-            )}
-
-            {search.result?.identity_card && (
-              <article className="result-window identity-window">
-                <header>
-                  <div className="module-icon">ID</div>
-                  <div>
-                    <h2>Identité numérique</h2>
-                    <p>Profil consolidé à partir des sources corrélées</p>
-                  </div>
-                  <TrustBadge level={(search.result.identity_card.confidence_summary?.verified ?? 0) > 0 ? "VERIFIED" : "PROBABLE"} />
-                </header>
-                <div className="identity-content">
-                  <div className="id-main">
-                    <span className="id-label">Cible analysée</span>
-                    <strong className="id-name">{search.result.identity_card.name || search.result.query}</strong>
-                  </div>
-                  <div className="confidence-grid">
-                    <span><b>{search.result.identity_card.confidence_summary?.verified ?? 0}</b> vérifiés</span>
-                    <span><b>{search.result.identity_card.confidence_summary?.probable ?? 0}</b> probables</span>
-                    <span><b>{search.result.identity_card.confidence_summary?.candidate ?? 0}</b> candidats</span>
-                  </div>
-                </div>
-              </article>
-            )}
-
-            {search.result && (
-              <div className="result-controls-bar">
-                <div className="view-mode-toggle">
-                  <button 
-                    type="button"
-                    className={`btn btn-sm ${viewMode === "table" ? "btn-gold" : "btn-glass"}`} 
-                    onClick={() => setViewMode("table")}
-                  >
-                    Vue Tableau
-                  </button>
-                  <button 
-                    type="button"
-                    className={`btn btn-sm ${viewMode === "sections" ? "btn-gold" : "btn-glass"}`} 
-                    onClick={() => setViewMode("sections")}
-                  >
-                    Vue Groupée
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* AFFICHE LE TABLEAU DE RESULTAT UNIFIE AVEC FILTRAGE ET BADGES */}
-            {search.result && viewMode === "table" && (
-              <article className="result-window">
-                <div className="window-header" style={{ borderBottom: "1px solid var(--border)", cursor: "default" }}>
-                  <div className="module-icon">📋</div>
-                  <div>
-                    <h2>Tous les signaux</h2>
-                    <p>{filteredItems.length} affiché(s) sur {allItems.length} signaux trouvés</p>
-                  </div>
-                </div>
-
-                <div className="table-filter-bar">
-                  <Search size={14} className="filter-icon" />
-                  <input 
-                    type="text" 
-                    placeholder="Filtrer ces résultats localement (source, valeur, type...)" 
-                    value={localFilter}
-                    onChange={(e) => setLocalFilter(e.target.value)}
-                    className="local-filter-input"
-                  />
-                  {localFilter && (
-                    <button type="button" className="clear-filter-btn" onClick={() => setLocalFilter("")}>
-                      ✕
-                    </button>
-                  )}
-                </div>
-
-                <div className="table-wrapper">
-                  <table className="modern-table">
-                    <thead>
-                      <tr>
-                        <th>Source</th>
-                        <th>Type</th>
-                        <th>Cible / Valeur</th>
-                        <th>Confiance</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredItems.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="table-empty">
-                            Aucun signal ne correspond aux critères de recherche locale.
-                          </td>
-                        </tr>
-                      ) : (
-                        filteredItems.map((item: any, idx: number) => {
-                          const src = item.source_data || item.platform || "Inconnue";
-                          const badgeClass = getSourceBadgeClass(src);
-                          const typeLabel = getRowType(item);
-                          const val = getRowValue(item);
-                          return (
-                            <tr key={idx}>
-                              <td>
-                                <span className={`source-badge ${badgeClass}`}>{src}</span>
-                              </td>
-                              <td className="cell-type">{typeLabel}</td>
-                              <td className="cell-value">
-                                {item.url ? (
-                                  <a href={item.url} target="_blank" rel="noreferrer">{val}</a>
-                                ) : (
-                                  <span>{val}</span>
-                                )}
-                              </td>
-                              <td>
-                                <TrustBadge level={item.trust_level || "CANDIDATE"} />
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </article>
-            )}
-
-            {/* AFFICHE LA VUE GROUPEE D'ORIGINE */}
-            {viewMode === "sections" && search.result?.sections.map((section: any, idx: number) => {
-              const items = section.items.filter((item: any) => filter === "ALL" || item.trust_level === filter);
-              if (!items.length) return null;
-              const isCollapsed = collapsed.has(section.label);
-              return (
-                <article className="result-window" key={section.label} style={{ animationDelay: `${120 + idx * 90}ms` }}>
-                  <button
-                    className="window-header"
-                    onClick={() => setCollapsed((cur) => { const n = new Set(cur); n.has(section.label) ? n.delete(section.label) : n.add(section.label); return n; })}
-                    aria-expanded={!isCollapsed}
-                  >
-                    <div className="module-icon">{section.icon || "◎"}</div>
-                    <div>
-                      <h2>{section.label}</h2>
-                      <p>{items.length} signal{items.length > 1 ? "aux" : ""} corrélé{items.length > 1 ? "s" : ""}</p>
-                    </div>
-                    <ChevronDown className={isCollapsed ? "collapsed" : ""} />
-                  </button>
-                  {!isCollapsed && (
-                    <div className="window-list">
-                      {items.map((item: any, i: number) => <ResultRow key={`${section.label}-${i}`} item={item} />)}
-                    </div>
-                  )}
-                </article>
-              );
-            })}
-
-            {search.result?.graph && <GraphView graph={search.result.graph} />}
-
-            {search.result && (
-              <div className="result-actions">
-                <div className="filter-group">
-                  {(["ALL", "VERIFIED", "PROBABLE", "CANDIDATE"] as const).map((level) => (
-                    <button
-                      key={level}
-                      className={`btn btn-sm ${filter === level ? "btn-gold" : "btn-glass"}`}
-                      onClick={() => setFilter(level)}
-                    >
-                      {level === "ALL" ? "Tous" : level}
-                    </button>
-                  ))}
-                </div>
-                <div>
-                  <button className="btn btn-glass" onClick={() => exportResult(search.result as SearchResult, "csv")}>
-                    <Download /> CSV
-                  </button>
-                  <button className="btn btn-glass" style={{ marginLeft: ".5rem" }} onClick={() => exportResult(search.result as SearchResult, "md")}>
-                    <Download /> Obsidian
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
 
 /* ─── Graph View ──────────────────────────────────────────────────────────── */
 
@@ -887,7 +588,6 @@ function GraphView({ graph }: { graph: Graph }) {
 
   if (!graph.nodes.length) return null;
 
-  // CORRIGÉ : gestion du pinch/zoom tactile pour mobile
   const touchState = useRef<{ dist: number; zoom: number } | null>(null);
 
   const onTouchStart = (e: React.TouchEvent) => {
@@ -987,7 +687,6 @@ function GraphView({ graph }: { graph: Graph }) {
             </filter>
           </defs>
 
-          {/* Arêtes */}
           {visibleEdges.map((e, i) => {
             const f = positions[e.from], t = positions[e.to];
             if (!f || !t) return null;
@@ -1018,7 +717,6 @@ function GraphView({ graph }: { graph: Graph }) {
             );
           })}
 
-          {/* Nœuds */}
           {visibleNodes.map(node => {
             const p = positions[node.id];
             if (!p) return null;
@@ -1058,7 +756,6 @@ function GraphView({ graph }: { graph: Graph }) {
           })}
         </svg>
 
-        {/* Tooltip flottant */}
         {tooltip && (
           <div style={{
             position: "absolute",
@@ -1089,7 +786,6 @@ function GraphView({ graph }: { graph: Graph }) {
           </div>
         )}
 
-        {/* Légende */}
         <div className="graph-legend">
           {Object.entries(NODE_COLORS).filter(([t]) => graph.nodes.some(n => n.type === t)).map(([type, color]) => (
             <span key={type} style={{ color, cursor: "pointer", opacity: filter === type || filter === "all" ? 1 : 0.4 }}
@@ -1100,7 +796,6 @@ function GraphView({ graph }: { graph: Graph }) {
         </div>
       </div>
 
-      {/* Détail nœud sélectionné */}
       {selected && (() => {
         const node = visibleNodes.find(n => n.id === selected);
         if (!node) return null;
@@ -1322,9 +1017,7 @@ function InlineError({ text }: { text: string }) {
   return <div className="error-glass"><TriangleAlert /><span>{text}</span></div>;
 }
 
-/* ─── Auth screen ─────────────────────────────────────────────────────────── */
-// ── DATABASES VIEW ────────────────────────────────────────────
-
+/* ─── Databases View ─────────────────────────────────────────── */
 interface DbEntry {
   id: string;
   name: string;
@@ -1432,7 +1125,6 @@ function DatabasesView() {
 
   return (
     <Page title="Bases de données" subtitle="Gestion des bases DuckDB disponibles">
-      {/* Add manually */}
       <section className="card" style={{ marginBottom: "1.5rem" }}>
         <h3 style={{ marginBottom: "1rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
           <Plus size={16} /> Ajouter une base manuellement
@@ -1461,7 +1153,6 @@ function DatabasesView() {
         {addError && <p style={{ color: "var(--danger)", marginTop: "0.5rem", fontSize: "0.85rem" }}>{addError}</p>}
       </section>
 
-      {/* Database list */}
       {loading && <Loading />}
       {error && <InlineError text={error} />}
       {!loading && !error && dbs.length === 0 && (
@@ -1493,7 +1184,6 @@ function DatabasesView() {
             )}
           </div>
 
-          {/* Stats panel */}
           {expandedId === db.id && (
             <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid var(--border)" }}>
               {statsLoading === db.id && <Loading />}
