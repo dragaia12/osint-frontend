@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, Database } from "lucide-react";
+import { ChevronDown, Database, KeyRound, Mail, Globe, User, MapPin, Building, Hash } from "lucide-react";
 
 interface LogAccordionListProps {
   title: string;
@@ -39,16 +39,9 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
             const isOpen = openIndices.has(idx);
             const primaryVal = item.email || item.username || item.ip || item.subdomain || item.domain || item.note || item.raw || "Signal";
             
-            // Récupère proprement le nom de la source/base (ex: "caf" si présent dans sources ou platform)
-            const rawSources = item.sources;
-            let sourceDb = "Base locale";
-            if (Array.isArray(rawSources) && rawSources.length > 0) {
-              sourceDb = rawSources[0];
-            } else if (typeof rawSources === "string") {
-              sourceDb = rawSources;
-            } else {
-              sourceDb = item.source || item.source_data || item.platform || "Base locale";
-            }
+            // Récupère une vraie source propre (priorité au nom du fichier/table s'il existe, sinon on nettoie)
+            const rawSource = item.sources?.[0] || item.source || item.source_data || item.platform || "base_locale";
+            const sourceDb = String(rawSource).replace(/['"[\]]/g, "").trim();
 
             return (
               <div 
@@ -98,12 +91,13 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                 {isOpen && (
                   <div style={{ padding: "14px", borderTop: "1px solid var(--border)", background: "rgba(0,0,0,0.25)", fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: "12px" }}>
                     
-                    {/* Affichage exhaustif de TOUTES les propriétés et clés contenues dans l'objet de résultat */}
+                    {/* Grille intelligente des données */}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px" }}>
                       {Object.entries(item).map(([key, value]) => {
+                        // On cache les champs techniques redondants ou vides
+                        if (["sources", "source_data", "platform"].includes(key)) return null;
                         if (value === null || value === undefined || value === "" || value === false) return null;
                         
-                        // Formate proprement les objets ou tableaux (comme les sources)
                         let displayVal = typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
 
                         return (
@@ -111,7 +105,7 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                             <span style={{ color: "var(--gold)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "3px", fontWeight: 700 }}>
                               <Database size={12} /> {key.toUpperCase()}
                             </span>
-                            <span style={{ fontFamily: key.includes("raw") || key.includes("password") ? "monospace" : "inherit", whiteSpace: "pre-wrap" }}>
+                            <span style={{ fontFamily: key.includes("raw") || key.includes("password") || key.includes("note") ? "monospace" : "inherit", whiteSpace: "pre-wrap" }}>
                               {displayVal}
                             </span>
                           </div>
