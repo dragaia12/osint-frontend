@@ -380,12 +380,6 @@ function SearchView({
                 <LogAccordionList
                   title="Résultats d'investigation détaillés"
                   items={filteredItems}
-                  fieldLabels={{
-                    email: "Identifiant principal",
-                    password: "Mot de passe / Jeton",
-                    raw: "Ligne brute",
-                    source_data: "Source",
-                  }}
                 />
               </div>
             )}
