@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type TouchEvent as ReactTouchEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   ChevronDown, CircleUserRound, Database, Download,
   FolderKanban, Gauge, HardDrive, LogOut, Menu, Plus, Search, Settings2,
@@ -75,7 +75,7 @@ function exportResult(result: SearchResult, format: "csv" | "md") {
   URL.revokeObjectURL(url);
 }
 
-/* ─── Search View ─────────────────────────────────────────────────────────── */
+/* ─── Search View Helpers ─────────────────────────────────────────────────── */
 function getSourceBadgeClass(source: string) {
   const s = source.toLowerCase();
   if (s.includes("leak") || s.includes("breach") || s.includes("db") || s.includes("comb") || s.includes("hacked")) {
