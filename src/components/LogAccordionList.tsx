@@ -39,9 +39,16 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
             const isOpen = openIndices.has(idx);
             const primaryVal = item.email || item.username || item.ip || item.subdomain || item.domain || item.note || item.raw || "Signal";
             
-            // Récupère une vraie source propre (priorité au nom du fichier/table s'il existe, sinon on nettoie)
+            // Récupère une source propre (ex: le nom de la table ou du fichier brut)
             const rawSource = item.sources?.[0] || item.source || item.source_data || item.platform || "base_locale";
             const sourceDb = String(rawSource).replace(/['"[\]]/g, "").trim();
+
+            // Détection intelligente du mot de passe (s'il est dans password, ou extrait du raw, ou de la note)
+            let revealedPassword = item.password || item.pass || item.pwd;
+            if (!revealedPassword && item.raw && typeof item.raw === "string" && item.raw.includes(":")) {
+              const parts = item.raw.split(":");
+              if (parts.length > 1) revealedPassword = parts[parts.length - 1].replace(/['",]/g, "").trim();
+            }
 
             return (
               <div 
@@ -79,6 +86,11 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                     </span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+                    {revealedPassword && (
+                      <span style={{ fontSize: "0.75rem", background: "rgba(234, 179, 8, 0.15)", color: "var(--gold)", padding: "2px 6px", borderRadius: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                        <KeyRound size={12} /> MDP TROUVÉ
+                      </span>
+                    )}
                     {item.trust_level && (
                       <span className={`trust-badge trust-${item.trust_level.toLowerCase()}`} style={{ fontSize: "0.7rem" }}>
                         {item.trust_level}
@@ -91,10 +103,21 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                 {isOpen && (
                   <div style={{ padding: "14px", borderTop: "1px solid var(--border)", background: "rgba(0,0,0,0.25)", fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: "12px" }}>
                     
-                    {/* Grille intelligente des données */}
+                    {/* Mise en avant explicite du mot de passe s'il a pu être extrait */}
+                    {revealedPassword && (
+                      <div style={{ background: "rgba(234, 179, 8, 0.1)", border: "1px solid rgba(234, 179, 8, 0.3)", padding: "10px 12px", borderRadius: "6px" }}>
+                        <span style={{ color: "var(--gold)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.75rem", marginBottom: "4px", fontWeight: 700 }}>
+                          <KeyRound size={14} /> MOT DE PASSE EXPOSÉ (EXTRAIT)
+                        </span>
+                        <strong style={{ color: "var(--gold)", fontFamily: "monospace", fontSize: "1rem", wordBreak: "break-all" }}>
+                          {revealedPassword}
+                        </strong>
+                      </div>
+                    )}
+
+                    {/* Grille dynamique pour toutes les propriétés restantes de l'objet */}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px" }}>
                       {Object.entries(item).map(([key, value]) => {
-                        // On cache les champs techniques redondants ou vides
                         if (["sources", "source_data", "platform"].includes(key)) return null;
                         if (value === null || value === undefined || value === "" || value === false) return null;
                         
@@ -105,7 +128,7 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                             <span style={{ color: "var(--gold)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "3px", fontWeight: 700 }}>
                               <Database size={12} /> {key.toUpperCase()}
                             </span>
-                            <span style={{ fontFamily: key.includes("raw") || key.includes("password") || key.includes("note") ? "monospace" : "inherit", whiteSpace: "pre-wrap" }}>
+                            <span style={{ fontFamily: key.includes("raw") || key.includes("password") ? "monospace" : "inherit", whiteSpace: "pre-wrap" }}>
                               {displayVal}
                             </span>
                           </div>
