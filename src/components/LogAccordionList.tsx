@@ -1,17 +1,25 @@
 import { useState } from "react";
-import { ChevronDown, KeyRound, Mail, Globe, Database } from "lucide-react";
+import { ChevronDown, KeyRound, Mail, Globe, Database, User, MapPin, Building, Hash } from "lucide-react";
 
 interface LogAccordionListProps {
   title: string;
   items: any[];
-  fieldLabels?: Record<string, string>;
 }
 
 export default function LogAccordionList({ title, items }: LogAccordionListProps) {
-  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  // Utilisation d'un Set pour permettre l'ouverture de plusieurs accordéons en même temps
+  const [openIndices, setOpenIndices] = useState<Set<number>>(new Set());
 
   const toggle = (index: number) => {
-    setOpenIndex(openIndex === index ? null : index);
+    setOpenIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
   };
 
   return (
@@ -29,7 +37,7 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
           <p style={{ color: "var(--muted-foreground)", padding: "1rem", textAlign: "center" }}>Aucun résultat à afficher.</p>
         ) : (
           items.map((item, idx) => {
-            const isOpen = openIndex === idx;
+            const isOpen = openIndices.has(idx);
             const primaryVal = item.email || item.username || item.ip || item.subdomain || item.domain || item.note || item.raw || "Signal";
             const sourceDb = item.source || item.source_data || item.platform || "Base locale";
 
@@ -45,6 +53,7 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                 }}
               >
                 <button
+                  type="button"
                   onClick={() => toggle(idx)}
                   style={{
                     width: "100%",
@@ -70,7 +79,7 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
                     {item.password && (
                       <span style={{ fontSize: "0.75rem", background: "rgba(234, 179, 8, 0.15)", color: "var(--gold)", padding: "2px 6px", borderRadius: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
-                        <KeyRound size={12} /> Mot de passe trouvé
+                        <KeyRound size={12} /> MDP
                       </span>
                     )}
                     {item.trust_level && (
@@ -85,12 +94,12 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                 {isOpen && (
                   <div style={{ padding: "14px", borderTop: "1px solid var(--border)", background: "rgba(0,0,0,0.2)", fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: "12px" }}>
                     
-                    {/* Bloc principal des identifiants / credentials */}
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px" }}>
+                    {/* Bloc mis en avant pour les identifiants clés */}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
                       {item.email && (
                         <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: "6px" }}>
                           <span style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" }}>
-                            <Mail size={12} /> EMAIL / IDENTIFIANT
+                            <Mail size={12} /> EMAIL
                           </span>
                           <strong style={{ wordBreak: "break-all" }}>{item.email}</strong>
                         </div>
@@ -105,6 +114,51 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                         </div>
                       )}
 
+                      {item.firstname && (
+                        <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: "6px" }}>
+                          <span style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" }}>
+                            <User size={12} /> PRÉNOM
+                          </span>
+                          <span>{item.firstname}</span>
+                        </div>
+                      )}
+
+                      {item.lastname && (
+                        <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: "6px" }}>
+                          <span style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" -->
+                            <User size={12} /> NOM
+                          </span>
+                          <span>{item.lastname}</span>
+                        </div>
+                      )}
+
+                      {item.phone && (
+                        <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: "6px" }}>
+                          <span style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" }}>
+                            <Hash size={12} /> TÉLÉPHONE
+                          </span>
+                          <span>{item.phone}</span>
+                        </div>
+                      )}
+
+                      {item.address && (
+                        <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: "6px" }}>
+                          <span style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" }}>
+                            <MapPin size={12} /> ADRESSE
+                          </span>
+                          <span>{item.address}</span>
+                        </div>
+                      )}
+
+                      {item.siret && (
+                        <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: "6px" }}>
+                          <span style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" }}>
+                            <Building size={12} /> SIRET
+                          </span>
+                          <span>{item.siret}</span>
+                        </div>
+                      )}
+
                       {item.domain && (
                         <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: "6px" }}>
                           <span style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" }}>
@@ -113,16 +167,25 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                           <span>{item.domain}</span>
                         </div>
                       )}
-
-                      <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: "6px" }}>
-                        <span style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" }}>
-                          <Database size={12} /> SOURCE / ORIGINE
-                        </span>
-                        <span>{sourceDb}</span>
-                      </div>
                     </div>
 
-                    {/* Ligne brute d'origine si présente */}
+                    {/* Affichage automatique et dynamique de TOUTES les autres propriétés présentes dans l'objet */}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "8px", marginTop: "4px", borderTop: "1px solid rgba(255,255,255,0.05)", paddingTop: "8px" }}>
+                      {Object.entries(item).map(([key, value]) => {
+                        // On exclut les clés déjà affichées au-dessus ou techniques pour éviter les doublons
+                        if (["email", "password", "firstname", "lastname", "phone", "address", "siret", "domain", "source", "source_data", "platform", "raw", "trust_level"].includes(key)) return null;
+                        if (value === null || value === undefined || value === "" || value === false) return null;
+                        
+                        return (
+                          <div key={key} style={{ wordBreak: "break-all" }}>
+                            <strong style={{ color: "var(--muted-foreground)", display: "block", fontSize: "0.7rem" }}>{key.toUpperCase()}</strong>
+                            <span>{typeof value === "object" ? JSON.stringify(value) : String(value)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Ligne brute (raw) */}
                     {item.raw && (
                       <div>
                         <strong style={{ color: "var(--muted-foreground)", display: "block", fontSize: "0.7rem", marginBottom: "4px" }}>LIGNE BRUTE (RAW)</strong>
@@ -131,12 +194,6 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                         </div>
                       </div>
                     )}
-
-                    {/* Autres métadonnées éventuelles */}
-                    <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", fontSize: "0.75rem", color: "var(--muted-foreground)", marginTop: "2px" }}>
-                      {item.password_set !== undefined && <span>Password set: <b>{String(item.password_set)}</b></span>}
-                      {item.trust_level && <span>Confiance: <b>{item.trust_level}</b></span>}
-                    </div>
 
                   </div>
                 )}
