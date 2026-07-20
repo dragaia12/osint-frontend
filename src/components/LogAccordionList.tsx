@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, KeyRound, Mail, Globe, Database } from "lucide-react";
 
 interface LogAccordionListProps {
   title: string;
@@ -31,10 +31,7 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
           items.map((item, idx) => {
             const isOpen = openIndex === idx;
             const primaryVal = item.email || item.username || item.ip || item.subdomain || item.domain || item.note || item.raw || "Signal";
-            
-            // Récupération propre de la source / base de données
-            const sourceDb = item.source_data || item.platform || (Array.isArray(item.sources) ? item.sources.join(", ") : item.sources) || "Base locale";
-            const leakDetails = item.note || item.description || item.raw || "Aucun détail supplémentaire";
+            const sourceDb = item.source || item.source_data || item.platform || "Base locale";
 
             return (
               <div 
@@ -71,6 +68,11 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                     </span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+                    {item.password && (
+                      <span style={{ fontSize: "0.75rem", background: "rgba(234, 179, 8, 0.15)", color: "var(--gold)", padding: "2px 6px", borderRadius: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
+                        <KeyRound size={12} /> Mot de passe trouvé
+                      </span>
+                    )}
                     {item.trust_level && (
                       <span className={`trust-badge trust-${item.trust_level.toLowerCase()}`} style={{ fontSize: "0.7rem" }}>
                         {item.trust_level}
@@ -81,32 +83,61 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                 </button>
 
                 {isOpen && (
-                  <div style={{ padding: "14px", borderTop: "1px solid var(--border)", background: "rgba(0,0,0,0.2)", fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: "10px" }}>
-                    <div>
-                      <strong style={{ color: "var(--gold)", display: "block", fontSize: "0.75rem", marginBottom: "2px" }}>BASE DE DONNÉES / SOURCE</strong>
-                      <span>{String(sourceDb)}</span>
-                    </div>
+                  <div style={{ padding: "14px", borderTop: "1px solid var(--border)", background: "rgba(0,0,0,0.2)", fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: "12px" }}>
+                    
+                    {/* Bloc principal des identifiants / credentials */}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px" }}>
+                      {item.email && (
+                        <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: "6px" }}>
+                          <span style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" }}>
+                            <Mail size={12} /> EMAIL / IDENTIFIANT
+                          </span>
+                          <strong style={{ wordBreak: "break-all" }}>{item.email}</strong>
+                        </div>
+                      )}
 
-                    <div>
-                      <strong style={{ color: "var(--gold)", display: "block", fontSize: "0.75rem", marginBottom: "2px" }}>INFORMATIONS / LEAK</strong>
-                      <div style={{ background: "rgba(0,0,0,0.4)", padding: "8px 10px", borderRadius: "6px", fontFamily: "monospace", wordBreak: "break-all" }}>
-                        {String(leakDetails)}
+                      {item.password && (
+                        <div style={{ background: "rgba(234, 179, 8, 0.08)", border: "1px solid rgba(234, 179, 8, 0.2)", padding: "8px 10px", borderRadius: "6px" }}>
+                          <span style={{ color: "var(--gold)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" }}>
+                            <KeyRound size={12} /> MOT DE PASSE (CLAIR)
+                          </span>
+                          <strong style={{ wordBreak: "break-all", color: "var(--gold)" }}>{item.password}</strong>
+                        </div>
+                      )}
+
+                      {item.domain && (
+                        <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: "6px" }}>
+                          <span style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" }}>
+                            <Globe size={12} /> DOMAINE
+                          </span>
+                          <span>{item.domain}</span>
+                        </div>
+                      )}
+
+                      <div style={{ background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: "6px" }}>
+                        <span style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.7rem", marginBottom: "2px" }}>
+                          <Database size={12} /> SOURCE / ORIGINE
+                        </span>
+                        <span>{sourceDb}</span>
                       </div>
                     </div>
 
-                    {/* Affiche dynamiquement le reste des propriétés s'il y en a */}
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "8px", marginTop: "4px" }}>
-                      {Object.entries(item).map(([key, value]) => {
-                        if (["source_data", "platform", "sources", "note", "description", "raw", "trust_level"].includes(key)) return null;
-                        if (value === null || value === undefined || value === "") return null;
-                        return (
-                          <div key={key} style={{ wordBreak: "break-all" }}>
-                            <strong style={{ color: "var(--muted-foreground)", display: "block", fontSize: "0.7rem" }}>{key.toUpperCase()}</strong>
-                            <span>{typeof value === "object" ? JSON.stringify(value) : String(value)}</span>
-                          </div>
-                        );
-                      })}
+                    {/* Ligne brute d'origine si présente */}
+                    {item.raw && (
+                      <div>
+                        <strong style={{ color: "var(--muted-foreground)", display: "block", fontSize: "0.7rem", marginBottom: "4px" }}>LIGNE BRUTE (RAW)</strong>
+                        <div style={{ background: "rgba(0,0,0,0.5)", padding: "8px 10px", borderRadius: "6px", fontFamily: "monospace", wordBreak: "break-all", fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+                          {item.raw}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Autres métadonnées éventuelles */}
+                    <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", fontSize: "0.75rem", color: "var(--muted-foreground)", marginTop: "2px" }}>
+                      {item.password_set !== undefined && <span>Password set: <b>{String(item.password_set)}</b></span>}
+                      {item.trust_level && <span>Confiance: <b>{item.trust_level}</b></span>}
                     </div>
+
                   </div>
                 )}
               </div>
