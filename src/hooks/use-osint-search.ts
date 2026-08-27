@@ -12,7 +12,7 @@ import type {
 
 const BACKEND_URL: string =
   (import.meta as unknown as { env: Record<string, string> }).env?.VITE_OSINT_BACKEND_URL
-  ?? "http://127.0.0.1:8765";
+  ?? "https://strengthen-citation-scripts-informal.trycloudflare.com";
 
 async function apiFetch(path: string, options?: RequestInit): Promise<Response> {
   const { data } = await supabase.auth.getSession();
