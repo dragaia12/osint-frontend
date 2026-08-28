@@ -5,6 +5,9 @@ import type {
   SearchStrategy,
   ToolError,
   EntityType,
+  ResultSection,
+  ResultItem,
+  Graph,
 } from "@/types/osint";
 
 const BACKEND_URL =
@@ -18,12 +21,6 @@ const BACKEND_URL =
 const REQUEST_TIMEOUT = 30000;
 
 type Row = Record<string, unknown>;
-
-interface ResultSection {
-  label: string;
-  icon: string;
-  items: Row[];
-}
 
 export interface SearchState {
   inProgress: boolean;
@@ -51,17 +48,37 @@ const INITIAL: SearchState = {
   fromCache: false,
 };
 
+// ============================================================================
+// HELPERS
+// ============================================================================
+
 function isRecord(value: unknown): value is Row {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function toText(value: unknown): string {
-  if (value === null || value === undefined) return "";
+  if (value === null || value === undefined) {
+    return "";
+  }
+
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return String(value).trim();
   }
+
   return "";
 }
+
+function stableStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+// ============================================================================
+// ENTITY DETECTION
+// ============================================================================
 
 function detectEntityType(query: string): EntityType {
   const value = query.trim();
@@ -88,6 +105,10 @@ function detectEntityType(query: string): EntityType {
 
   return "username";
 }
+
+// ============================================================================
+// EXTRACTION DES LIGNES
+// ============================================================================
 
 function extractRows(data: unknown): Row[] {
   if (Array.isArray(data)) {
@@ -121,162 +142,159 @@ function extractRows(data: unknown): Row[] {
   return [];
 }
 
+// ============================================================================
+// NORMALISATION
+// ============================================================================
+
 function normalizeRow(row: Row): Row {
   const normalized: Row = {};
+
   for (const [key, value] of Object.entries(row)) {
     normalized[key] = value;
   }
+
+  const sourceData = row.source_data;
+
+  if (typeof sourceData === "string") {
+    try {
+      const parsed: unknown = JSON.parse(sourceData);
+      if (isRecord(parsed)) {
+        for (const [key, value] of Object.entries(parsed)) {
+          if (!(key in normalized)) {
+            normalized[key] = value;
+          }
+        }
+      }
+    } catch {
+      // Ce n'est pas du JSON : on conserve source_data tel quel.
+    }
+  }
+
   return normalized;
 }
+
+// ============================================================================
+// FIELD HELPERS
+// ============================================================================
 
 function getField(row: Row, names: string[]): string {
   for (const name of names) {
     if (name in row) {
       const value = toText(row[name]);
-      if (value) return value;
+      if (value) {
+        return value;
+      }
     }
 
-    const matchingKey = Object.keys(row).find(
-      (key) => key.toLowerCase() === name.toLowerCase()
-    );
+    const matchingKey = Object.keys(row).find((key) => key.toLowerCase() === name.toLowerCase());
 
     if (matchingKey) {
       const value = toText(row[matchingKey]);
-      if (value) return value;
+      if (value) {
+        return value;
+      }
     }
   }
+
   return "";
 }
 
 function getSource(row: Row): string {
   return (
-    getField(row, ["source", "source_file", "filename", "file", "dataset", "table", "database", "origin"]) ||
-    "Database"
+    getField(row, [
+      "source",
+      "source_file",
+      "filename",
+      "file",
+      "dataset",
+      "table",
+      "database",
+      "origin",
+    ]) || "Database"
   );
 }
+
+// ============================================================================
+// DEDUPLICATION
+// ============================================================================
 
 function deduplicate(rows: Row[]): Row[] {
   const seen = new Set<string>();
   const output: Row[] = [];
 
   for (const row of rows) {
-    try {
-      const key = JSON.stringify(row);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      output.push(row);
-    } catch {
-      output.push(row);
+    const key = stableStringify(row);
+    if (seen.has(key)) {
+      continue;
     }
+    seen.add(key);
+    output.push(row);
   }
 
   return output;
 }
 
-function createItem(row: Row, source: string): Row {
+// ============================================================================
+// CREATE ITEM
+// ============================================================================
+
+function createItem(row: Row, source: string): ResultItem {
   return {
     ...row,
     platform: toText(row.platform) || source,
+    category: toText(row.category) || "backend",
     source: toText(row.source) || source,
-    sources: Array.isArray(row.sources) ? row.sources : [source],
-    trust_level: toText(row.trust_level) || "VERIFIED",
-  };
+    sources: Array.isArray(row.sources)
+      ? row.sources.filter((value): value is string => typeof value === "string")
+      : [source],
+    trust_level: (toText(row.trust_level) as ResultItem["trust_level"]) || "VERIFIED",
+  } as ResultItem;
 }
+
+// ============================================================================
+// BUILD SEARCH RESULT
+// ============================================================================
 
 function buildSearchResult(query: string, rows: Row[]): SearchResult {
   const inputType = detectEntityType(query);
 
-  const emails: Row[] = [];
-  const usernames: Row[] = [];
-  const ips: Row[] = [];
-  const phones: Row[] = [];
-  const domains: Row[] = [];
-  const hashes: Row[] = [];
-  const exposed: Row[] = [];
-  const others: Row[] = [];
+  const completeItems: ResultItem[] = rows.map((originalRow) => {
+    const row = normalizeRow(originalRow);
+    const source = getSource(row);
+    return createItem(row, source);
+  });
+
+  const uniqueItems = deduplicate(completeItems as Row[]) as ResultItem[];
 
   let verified = 0;
   let probable = 0;
   let candidate = 0;
 
-  for (const originalRow of rows) {
-    const row = normalizeRow(originalRow);
-    const source = getSource(row);
-    const item = createItem(row, source);
-
-    const email = getField(row, ["email", "email_address", "mail", "e_mail"]);
-    const username = getField(row, ["username", "user_name", "user", "login", "nickname", "nick", "pseudo", "handle", "screen_name"]);
-    const ip = getField(row, ["ip", "ip_address", "ipv4", "ipv6"]);
-    const phone = getField(row, ["phone", "phone_number", "telephone", "tel", "mobile"]);
-    const domain =
-      getField(row, ["domain", "hostname", "host", "website"]) || (email.includes("@") ? email.split("@")[1] || "" : "");
-    const hash = getField(row, ["hash", "hash_val", "hash_value", "md5", "sha1", "sha256", "sha512", "password_hash"]);
-
-    let categorized = false;
-
-    if (email) {
-      emails.push({ ...item, email });
+  for (const row of uniqueItems) {
+    const trust = toText(row.trust_level).toUpperCase();
+    if (trust === "VERIFIED") {
       verified++;
-      categorized = true;
-    }
-
-    if (username) {
-      usernames.push({ ...item, username });
-      verified++;
-      categorized = true;
-    }
-
-    if (ip) {
-      ips.push({ ...item, ip });
-      verified++;
-      categorized = true;
-    }
-
-    if (phone) {
-      phones.push({ ...item, phone, note: phone });
+    } else if (trust === "PROBABLE") {
       probable++;
-      categorized = true;
-    }
-
-    if (domain) {
-      domains.push({ ...item, domain, subdomain: toText(row.subdomain) || domain });
-      probable++;
-      categorized = true;
-    }
-
-    if (hash) {
-      hashes.push({ ...item, hash, hash_val: hash });
-      candidate++;
-      categorized = true;
-    }
-
-    const hasPassword = Boolean(row.password || row.password_hash || row.password_set || row.has_password);
-
-    if (email && hasPassword) {
-      exposed.push({
-        ...item,
-        email,
-        alert_type: "credential_exposure",
-        note: "Donnée d'authentification détectée",
-      });
-    }
-
-    if (!categorized) {
-      others.push({ ...item });
+    } else {
       candidate++;
     }
   }
 
-  const sections: ResultSection[] = [
-    { label: "Données exposées", icon: "🚨", items: deduplicate(exposed) },
-    { label: "Emails", icon: "📧", items: deduplicate(emails) },
-    { label: "Identifiants", icon: "👤", items: deduplicate(usernames) },
-    { label: "Adresses IP", icon: "🌐", items: deduplicate(ips) },
-    { label: "Téléphones", icon: "📱", items: deduplicate(phones) },
-    { label: "Domaines", icon: "🔗", items: deduplicate(domains) },
-    { label: "Hashes", icon: "🔐", items: deduplicate(hashes) },
-    { label: "Autres données", icon: "📂", items: deduplicate(others) },
-  ].filter((section) => section.items.length > 0);
+  const sections: ResultSection[] = [];
+
+  if (uniqueItems.length > 0) {
+    sections.push({
+      label: "Résultats complets",
+      icon: "📂",
+      items: uniqueItems,
+    });
+  }
+
+  const graph: Graph = {
+    nodes: [],
+    edges: [],
+  };
 
   return {
     query,
@@ -289,14 +307,15 @@ function buildSearchResult(query: string, rows: Row[]): SearchResult {
         candidate,
       },
     },
-    sections: sections as any,
-    total_results: rows.length,
-    graph: {
-      nodes: [],
-      edges: [],
-    } as any,
+    sections,
+    total_results: uniqueItems.length,
+    graph,
   };
 }
+
+// ============================================================================
+// API FETCH
+// ============================================================================
 
 async function apiFetch(path: string, signal: AbortSignal): Promise<Response> {
   const timeoutController = new AbortController();
@@ -329,10 +348,18 @@ async function apiFetch(path: string, signal: AbortSignal): Promise<Response> {
   }
 }
 
+// ============================================================================
+// HOOK
+// ============================================================================
+
 export function useSearch(): UseSearchReturn {
   const [state, setState] = useState<SearchState>(INITIAL);
   const cancelledRef = useRef(false);
   const controllerRef = useRef<AbortController | null>(null);
+
+  // --------------------------------------------------------------------------
+  // CANCEL
+  // --------------------------------------------------------------------------
 
   const cancelSearch = useCallback(() => {
     cancelledRef.current = true;
@@ -344,11 +371,19 @@ export function useSearch(): UseSearchReturn {
     }));
   }, []);
 
+  // --------------------------------------------------------------------------
+  // RESET
+  // --------------------------------------------------------------------------
+
   const reset = useCallback(() => {
     cancelledRef.current = true;
     controllerRef.current?.abort();
     setState(INITIAL);
   }, []);
+
+  // --------------------------------------------------------------------------
+  // SEARCH
+  // --------------------------------------------------------------------------
 
   const startSearch = useCallback((query: string, _strategy: SearchStrategy) => {
     const cleanQuery = query.trim();
@@ -421,6 +456,15 @@ export function useSearch(): UseSearchReturn {
 
         const cached = isRecord(data) ? Boolean(data.cached || data.from_cache) : false;
 
+        if (import.meta.env.DEV) {
+          console.log("[OSINT] Backend response:", data);
+          console.log("[OSINT] Extracted rows:", rows);
+          console.log("[OSINT] Number of columns:", rows.length > 0 ? Object.keys(rows[0]).length : 0);
+          if (rows.length > 0) {
+            console.log("[OSINT] First row columns:", Object.keys(rows[0]));
+          }
+        }
+
         setState((previous) => ({
           ...previous,
           inProgress: false,
@@ -465,6 +509,10 @@ export function useSearch(): UseSearchReturn {
       }
     })();
   }, []);
+
+  // --------------------------------------------------------------------------
+  // RETURN
+  // --------------------------------------------------------------------------
 
   return {
     ...state,
