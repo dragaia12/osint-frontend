@@ -218,7 +218,7 @@ function getSource(row: Row): string {
 // DEDUPLICATION
 // ============================================================================
 
-function deduplicate(rows: Row[]): Row[] {
+function deduplicateRows(rows: Row[]): Row[] {
   const seen = new Set<string>();
   const output: Row[] = [];
 
@@ -239,19 +239,27 @@ function deduplicate(rows: Row[]): Row[] {
 // ============================================================================
 
 function createItem(row: Row, source: string): ResultItem {
-  // Commencer avec toutes les propriétés de la ligne
-  const item: Record<string, unknown> = { ...row };
+  // Créer un objet avec toutes les propriétés nécessaires
+  const item: ResultItem = {
+    // Propriétés requises par ResultItem
+    platform: toText(row.platform) || source,
+    category: toText(row.category) || "backend",
+    source: toText(row.source) || source,
+    sources: Array.isArray(row.sources)
+      ? row.sources.filter((value): value is string => typeof value === "string")
+      : [source],
+    trust_level: (toText(row.trust_level) as ResultItem["trust_level"]) || "VERIFIED",
+  };
 
-  // Ajouter/mettre à jour les propriétés standard
-  item.platform = toText(row.platform) || source;
-  item.category = toText(row.category) || "backend";
-  item.source = toText(row.source) || source;
-  item.sources = Array.isArray(row.sources)
-    ? row.sources.filter((value): value is string => typeof value === "string")
-    : [source];
-  item.trust_level = (toText(row.trust_level) as ResultItem["trust_level"]) || "VERIFIED";
+  // Ajouter toutes les propriétés supplémentaires de la ligne
+  for (const [key, value] of Object.entries(row)) {
+    // Ne pas écraser les propriétés déjà définies
+    if (!(key in item)) {
+      (item as Record<string, unknown>)[key] = value;
+    }
+  }
 
-  return item as ResultItem;
+  return item;
 }
 
 // ============================================================================
@@ -261,13 +269,14 @@ function createItem(row: Row, source: string): ResultItem {
 function buildSearchResult(query: string, rows: Row[]): SearchResult {
   const inputType = detectEntityType(query);
 
+  // Normaliser et créer les items
   const completeItems: ResultItem[] = rows.map((originalRow) => {
     const row = normalizeRow(originalRow);
     const source = getSource(row);
     return createItem(row, source);
   });
 
-  // Dédupliquer en utilisant la sérialisation
+  // Dédupliquer
   const seen = new Set<string>();
   const uniqueItems: ResultItem[] = [];
 
@@ -279,12 +288,13 @@ function buildSearchResult(query: string, rows: Row[]): SearchResult {
     }
   }
 
+  // Calculer les statistiques de confiance
   let verified = 0;
   let probable = 0;
   let candidate = 0;
 
-  for (const row of uniqueItems) {
-    const trust = toText(row.trust_level).toUpperCase();
+  for (const item of uniqueItems) {
+    const trust = toText(item.trust_level).toUpperCase();
     if (trust === "VERIFIED") {
       verified++;
     } else if (trust === "PROBABLE") {
@@ -294,6 +304,7 @@ function buildSearchResult(query: string, rows: Row[]): SearchResult {
     }
   }
 
+  // Construire les sections
   const sections: ResultSection[] = [];
 
   if (uniqueItems.length > 0) {
