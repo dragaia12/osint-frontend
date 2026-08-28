@@ -239,16 +239,19 @@ function deduplicate(rows: Row[]): Row[] {
 // ============================================================================
 
 function createItem(row: Row, source: string): ResultItem {
-  return {
-    ...row,
-    platform: toText(row.platform) || source,
-    category: toText(row.category) || "backend",
-    source: toText(row.source) || source,
-    sources: Array.isArray(row.sources)
-      ? row.sources.filter((value): value is string => typeof value === "string")
-      : [source],
-    trust_level: (toText(row.trust_level) as ResultItem["trust_level"]) || "VERIFIED",
-  } as ResultItem;
+  // Commencer avec toutes les propriétés de la ligne
+  const item: Record<string, unknown> = { ...row };
+
+  // Ajouter/mettre à jour les propriétés standard
+  item.platform = toText(row.platform) || source;
+  item.category = toText(row.category) || "backend";
+  item.source = toText(row.source) || source;
+  item.sources = Array.isArray(row.sources)
+    ? row.sources.filter((value): value is string => typeof value === "string")
+    : [source];
+  item.trust_level = (toText(row.trust_level) as ResultItem["trust_level"]) || "VERIFIED";
+
+  return item as ResultItem;
 }
 
 // ============================================================================
@@ -264,7 +267,17 @@ function buildSearchResult(query: string, rows: Row[]): SearchResult {
     return createItem(row, source);
   });
 
-  const uniqueItems = deduplicate(completeItems as Row[]) as ResultItem[];
+  // Dédupliquer en utilisant la sérialisation
+  const seen = new Set<string>();
+  const uniqueItems: ResultItem[] = [];
+
+  for (const item of completeItems) {
+    const key = stableStringify(item);
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueItems.push(item);
+    }
+  }
 
   let verified = 0;
   let probable = 0;
@@ -357,10 +370,6 @@ export function useSearch(): UseSearchReturn {
   const cancelledRef = useRef(false);
   const controllerRef = useRef<AbortController | null>(null);
 
-  // --------------------------------------------------------------------------
-  // CANCEL
-  // --------------------------------------------------------------------------
-
   const cancelSearch = useCallback(() => {
     cancelledRef.current = true;
     controllerRef.current?.abort();
@@ -371,19 +380,11 @@ export function useSearch(): UseSearchReturn {
     }));
   }, []);
 
-  // --------------------------------------------------------------------------
-  // RESET
-  // --------------------------------------------------------------------------
-
   const reset = useCallback(() => {
     cancelledRef.current = true;
     controllerRef.current?.abort();
     setState(INITIAL);
   }, []);
-
-  // --------------------------------------------------------------------------
-  // SEARCH
-  // --------------------------------------------------------------------------
 
   const startSearch = useCallback((query: string, _strategy: SearchStrategy) => {
     const cleanQuery = query.trim();
@@ -509,10 +510,6 @@ export function useSearch(): UseSearchReturn {
       }
     })();
   }, []);
-
-  // --------------------------------------------------------------------------
-  // RETURN
-  // --------------------------------------------------------------------------
 
   return {
     ...state,
