@@ -167,6 +167,72 @@ button, input, select { font: inherit; }
 }
 .detect-pill { color: var(--gold); border: 1px solid color-mix(in oklab, var(--gold) 28%, transparent); background: color-mix(in oklab, var(--gold) 9%, transparent); }
 
+.search-type-select {
+  flex: none; appearance: none; -webkit-appearance: none;
+  margin-left: .3rem; padding: .55rem 2.1rem .55rem .9rem;
+  border-radius: 999px; border: 1px solid color-mix(in oklab, var(--gold) 28%, var(--border));
+  background: color-mix(in oklab, var(--gold) 9%, transparent);
+  color: var(--gold); font-size: .62rem; font-weight: 900; text-transform: uppercase;
+  letter-spacing: .04em; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--gold) 50%), linear-gradient(135deg, var(--gold) 50%, transparent 50%);
+  background-position: calc(100% - 1rem) center, calc(100% - .7rem) center;
+  background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+}
+.search-type-select:focus { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+/* ── Mode tabs (rapide / avancée) ────────────────────────────────────────── */
+.search-mode-tabs {
+  display: flex; gap: .35rem; margin-bottom: 1.1rem;
+  padding: .3rem; border-radius: 999px; width: fit-content; max-width: 100%;
+  border: 1px solid var(--border); background: var(--glass);
+  backdrop-filter: blur(20px);
+}
+.search-mode-tab {
+  display: inline-flex; align-items: center; gap: .4rem;
+  border: 0; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  padding: .55rem 1.1rem; font-size: .78rem; font-weight: 800;
+  color: var(--muted-foreground); background: transparent; transition: all .18s ease;
+}
+.search-mode-tab:hover { color: var(--foreground); }
+.search-mode-tab.active { background: var(--gold); color: var(--primary-foreground); box-shadow: var(--shadow-gold); }
+.search-mode-tab .tab-badge {
+  font-size: .55rem; font-weight: 900; letter-spacing: .04em;
+  padding: .15rem .4rem; border-radius: 999px;
+  color: oklch(0.82 0.16 145); background: oklch(0.3 0.09 145 / 30%);
+}
+.search-mode-tab.active .tab-badge { color: oklch(0.22 0.09 145); background: oklch(0.9 0.16 145 / 55%); }
+
+/* ── Recherche avancée : formulaire structuré en accordéon ──────────────────── */
+.adv-search { display: grid; gap: .75rem; text-align: left; }
+.adv-search-section.result-window { border-radius: 1.25rem; }
+.adv-search-section .window-header { grid-template-columns: auto minmax(0,1fr) auto auto; padding: 1rem 1.25rem; }
+.adv-search-count {
+  display: inline-grid; place-items: center; min-width: 1.5rem; height: 1.5rem;
+  border-radius: 999px; padding: 0 .4rem;
+  font-size: .68rem; font-weight: 900; color: var(--primary-foreground); background: var(--gold);
+}
+.adv-search-body {
+  padding: .3rem 1.25rem 1.25rem;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .9rem;
+}
+.adv-field { display: grid; gap: .4rem; }
+.adv-field-label { font-size: .66rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--muted-foreground); }
+.adv-field-input-wrap { position: relative; display: flex; }
+.adv-field-input-wrap input {
+  width: 100%; border: 1px solid var(--border); border-radius: .8rem;
+  background: var(--muted); color: var(--foreground);
+  padding: .7rem 2.2rem .7rem .85rem; font-size: .85rem;
+}
+.adv-field-input-wrap input::placeholder { color: color-mix(in oklab, var(--muted-foreground) 70%, transparent); }
+.adv-field-input-wrap input:focus { outline: 2px solid var(--gold); outline-offset: 1px; border-color: transparent; }
+.adv-field-clear {
+  position: absolute; right: .45rem; top: 50%; transform: translateY(-50%);
+  display: grid; place-items: center; width: 1.5rem; height: 1.5rem;
+  border: 0; border-radius: 999px; background: transparent; color: var(--muted-foreground); cursor: pointer;
+}
+.adv-field-clear:hover { color: var(--gold); background: color-mix(in oklab, var(--gold) 14%, transparent); }
+.adv-search-actions { display: flex; justify-content: flex-end; gap: .6rem; margin-top: .3rem; }
+
 .search-options { margin-top: 1.1rem; display: flex; justify-content: center; align-items: center; gap: .6rem; color: var(--muted-foreground); }
 .search-options label { display: flex; align-items: center; gap: .35rem; font-size: .65rem; text-transform: uppercase; font-weight: 800; }
 .search-options label svg { width: .9rem; }
@@ -342,9 +408,14 @@ button, input, select { font: inherit; }
 @media (max-width: 640px) {
   .search-stage { padding-inline: .8rem; padding-top: 4.5rem; }
   .search-intro h1 { font-size: 2.65rem; }
-  .search-shell { display: grid; grid-template-columns: auto minmax(0,1fr) auto; border-radius: 1.25rem; }
-  .search-shell .detect-pill { grid-column: 2; justify-self: start; }
+  .search-shell { display: grid; grid-template-columns: auto auto minmax(0,1fr); border-radius: 1.25rem; align-items: center; }
+  .search-shell .search-type-select { grid-column: 1 / -1; justify-self: start; margin-left: 0; margin-bottom: .5rem; }
   .search-shell button { grid-column: 1 / -1; width: 100%; min-height: 2.8rem; }
+  .search-mode-tabs { width: 100%; }
+  .search-mode-tab { flex: 1; justify-content: center; padding: .55rem .6rem; font-size: .7rem; }
+  .adv-search-body { grid-template-columns: 1fr; }
+  .adv-search-actions { flex-direction: column-reverse; }
+  .adv-search-actions .btn { width: 100%; }
   .identity-content { grid-template-columns: 1fr; }
   .confidence-grid { display: grid; grid-template-columns: repeat(3,1fr); }
   .confidence-grid span { padding: .55rem; }
