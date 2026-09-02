@@ -1,9 +1,173 @@
 import { useState } from "react";
-import { ChevronDown, Database, KeyRound, Mail, Globe, User, MapPin, Building, Hash } from "lucide-react";
+import {
+  ChevronDown, Database, KeyRound, Mail, Globe, User, MapPin, Building, Hash,
+  Phone, Cake, VenusAndMars, IdCard, Users, Landmark, Copy, ShieldAlert, Check,
+} from "lucide-react";
 
 interface LogAccordionListProps {
   title: string;
   items: any[];
+}
+
+// ============================================================================
+// RÉSOLUTION DES CHAMPS D'IDENTITÉ
+// ============================================================================
+// Les colonnes brutes varient selon la base source (fr/en, snake_case…).
+// On tente plusieurs alias connus pour chaque emplacement de la fiche.
+// ============================================================================
+
+const FIELD_ALIASES: Record<string, string[]> = {
+  nom: ["nom", "last_name", "lastname", "surname", "nom_famille"],
+  prenom: ["prenom", "first_name", "firstname", "given_name"],
+  email: ["email", "mail", "e_mail"],
+  telephone: ["telephone", "phone", "tel", "mobile", "numero", "num_tel"],
+  naissance: ["naissance", "date_naissance", "birthdate", "dob", "date_of_birth"],
+  genre: ["genre", "gender", "sexe", "sex"],
+  adresse: ["adresse", "address", "street", "rue"],
+  ville: ["ville", "city", "commune"],
+  code_postal: ["code_postal", "zipcode", "postal_code", "cp"],
+  qualite: ["qualite", "civilite", "title", "statut"],
+  nom_parent: ["nom_parent", "parent_nom", "parent_lastname"],
+  prenom_parent: ["prenom_parent", "parent_prenom", "parent_firstname"],
+  organisme: ["organisme", "organization", "organisation", "source_org"],
+};
+
+function pick(item: any, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const val = item[key];
+    if (val !== null && val !== undefined && String(val).trim() !== "") {
+      return String(val).trim();
+    }
+  }
+  return undefined;
+}
+
+interface ResolvedIdentity {
+  nom?: string;
+  prenom?: string;
+  email?: string;
+  telephone?: string;
+  naissance?: string;
+  genre?: string;
+  adresse?: string;
+  ville?: string;
+  code_postal?: string;
+  qualite?: string;
+  nom_parent?: string;
+  prenom_parent?: string;
+  organisme?: string;
+  nom_complet?: string;
+  filledCount: number;
+}
+
+function resolveIdentity(item: any): ResolvedIdentity {
+  const resolved: Record<string, string | undefined> = {};
+  for (const [slot, aliases] of Object.entries(FIELD_ALIASES)) {
+    resolved[slot] = pick(item, aliases);
+  }
+  const nomComplet =
+    [resolved.prenom, resolved.nom].filter(Boolean).join(" ") ||
+    (item.name ? String(item.name).trim() : undefined) ||
+    (item.username ? String(item.username).trim() : undefined);
+
+  const filledCount = Object.values(resolved).filter(Boolean).length;
+
+  return { ...resolved, nom_complet: nomComplet, filledCount };
+}
+
+const IDENTITY_FIELD_SLOTS: { key: string; label: string; icon: any }[] = [
+  { key: "nom", label: "Nom", icon: User },
+  { key: "prenom", label: "Prénom", icon: User },
+  { key: "nom_complet", label: "Nom complet", icon: IdCard },
+  { key: "email", label: "Email", icon: Mail },
+  { key: "telephone", label: "Téléphone", icon: Phone },
+  { key: "naissance", label: "Naissance", icon: Cake },
+  { key: "genre", label: "Genre", icon: VenusAndMars },
+  { key: "adresse", label: "Adresse", icon: MapPin },
+  { key: "ville", label: "Ville", icon: Globe },
+  { key: "code_postal", label: "Code postal", icon: Hash },
+  { key: "qualite", label: "Qualité", icon: IdCard },
+  { key: "nom_parent", label: "Nom (parent)", icon: Users },
+  { key: "prenom_parent", label: "Prénom (parent)", icon: Users },
+  { key: "organisme", label: "Organisme", icon: Landmark },
+];
+
+const RISK_LABELS: Record<string, { label: string; className: string }> = {
+  VERIFIED: { label: "Élevé", className: "risk-high" },
+  PROBABLE: { label: "Moyen", className: "risk-medium" },
+  CANDIDATE: { label: "Faible", className: "risk-low" },
+};
+
+function copyIdentityToClipboard(identity: ReturnType<typeof resolveIdentity>) {
+  const lines = IDENTITY_FIELD_SLOTS
+    .map((slot) => [slot.label, (identity as any)[slot.key]])
+    .filter(([, value]) => Boolean(value))
+    .map(([label, value]) => `${label} : ${value}`);
+  const text = lines.join("\n") || "Aucune donnée disponible";
+  navigator.clipboard?.writeText(text).catch(() => {});
+}
+
+function IdentityCard({ item, index }: { item: any; index: number }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const identity = resolveIdentity(item);
+  const risk = RISK_LABELS[String(item.trust_level).toUpperCase()] || RISK_LABELS.CANDIDATE;
+  const sourcesCount = Array.isArray(item.sources) ? item.sources.length : 0;
+  const hasPII = Boolean(identity.nom || identity.prenom || identity.email || identity.telephone || identity.adresse);
+  const hasFamily = Boolean(identity.nom_parent || identity.prenom_parent);
+  const totalSlots = IDENTITY_FIELD_SLOTS.length - 1; // nom_complet est dérivé, pas un critère saisi
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    copyIdentityToClipboard(identity);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div className="identity-card">
+      <button type="button" className="identity-card-header" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <span className="identity-chip identity-chip-index">#{index + 1}</span>
+        <span className="identity-chip identity-chip-criteria">Champs : {identity.filledCount}/{totalSlots}</span>
+        <span className="identity-card-name">{identity.nom_complet || "Identité non résolue"}</span>
+
+        <span className="identity-header-spacer" />
+
+        {sourcesCount > 1 && (
+          <span className="identity-chip identity-chip-sources"><Users size={13} /> ×{sourcesCount}</span>
+        )}
+        <span className={`identity-chip identity-chip-risk ${risk.className}`}>
+          <span className="risk-dot" /> {risk.label}
+        </span>
+        {hasPII && (
+          <span className="identity-chip identity-chip-rgpd"><ShieldAlert size={13} /> RGPD</span>
+        )}
+        {hasFamily && (
+          <span className="identity-chip identity-chip-family"><Users size={13} /> Liens famille</span>
+        )}
+        <span className="identity-chip identity-chip-copy" onClick={handleCopy} role="button" tabIndex={0}>
+          {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Copié" : "Copier"}
+        </span>
+
+        <ChevronDown size={16} className={open ? "" : "collapsed"} />
+      </button>
+
+      {open && (
+        <div className="identity-card-grid">
+          {IDENTITY_FIELD_SLOTS.map((slot) => {
+            const Icon = slot.icon;
+            const value = (identity as any)[slot.key];
+            return (
+              <div className="identity-field" key={slot.key}>
+                <span className="identity-field-label"><Icon size={12} /> {slot.label}</span>
+                <span className={`identity-field-value ${value ? "" : "empty"}`}>{value || "—"}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function LogAccordionList({ title, items }: LogAccordionListProps) {
@@ -36,6 +200,11 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
           <p style={{ color: "var(--muted-foreground)", padding: "1rem", textAlign: "center" }}>Aucun résultat à afficher.</p>
         ) : (
           items.map((item, idx) => {
+            const identityPreview = resolveIdentity(item);
+            if (identityPreview.filledCount >= 2) {
+              return <IdentityCard key={idx} item={item} index={idx} />;
+            }
+
             const isOpen = openIndices.has(idx);
             const primaryVal = item.email || item.username || item.ip || item.subdomain || item.domain || item.note || item.raw || "Signal";
             
