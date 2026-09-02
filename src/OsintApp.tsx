@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import {
   ChevronDown, CircleUserRound, Database, Download,
   FolderKanban, Gauge, HardDrive, LogOut, Menu, Plus, Search, Settings2,
-  ShieldCheck, TriangleAlert, Trash2, X,
+  ShieldCheck, TriangleAlert, Trash2, X, Mail, MapPin, Globe, Gamepad2,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -11,7 +11,7 @@ import {
 } from "@/lib/osint-data";
 import { useSearch as useOsintSearch } from "@/hooks/use-osint-search";
 import LogAccordionList from "./components/LogAccordionList";
-import type { Dossier, Graph, GraphNode, GraphEdge, ResultItem, SearchResult, SearchStrategy, TrustLevel, UserRole } from "@/types/osint";
+import type { Dossier, Graph, GraphNode, GraphEdge, ResultItem, SearchResult, SearchStrategy, TrustLevel, UserRole, EntityType } from "@/types/osint";
 
 type View = "search" | "dashboard" | "dossiers" | "databases" | "admin";
 type User = { id: string; email: string };
@@ -21,15 +21,127 @@ const strategyLabels: Record<SearchStrategy, string> = {
   social: "Social", infrastructure: "Infrastructure",
 };
 
-function detectType(value: string) {
-  const q = value.trim();
-  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(q)) return "IP";
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(q)) return "Email";
-  if (/^https?:\/\//i.test(q)) return "URL";
-  if (/^\+?[\d\s-]{6,15}$/.test(q)) return "Téléphone";
-  if (/^[a-f\d]{32,64}$/i.test(q)) return "Hash";
-  if (/^[\w-]+\.[a-z]{2,}$/i.test(q)) return "Domaine";
-  return q.includes(" ") ? "Nom" : "Username";
+// ─── Sélecteur manuel de type de cible ──────────────────────────────────────
+// L'utilisateur indique lui-même ce qu'il a en main plutôt que de laisser
+// l'app deviner le type à partir du texte saisi.
+const SEARCH_TYPE_OPTIONS: { value: EntityType; label: string; placeholder: string }[] = [
+  { value: "email", label: "Email", placeholder: "ex: jean.dupont@email.com" },
+  { value: "username", label: "Pseudo / Username", placeholder: "ex: jdupont92" },
+  { value: "phone", label: "Téléphone", placeholder: "ex: +33 6 12 34 56 78" },
+  { value: "ip", label: "Adresse IP", placeholder: "ex: 192.168.1.1" },
+  { value: "domain", label: "Domaine", placeholder: "ex: exemple.com" },
+  { value: "url", label: "URL", placeholder: "ex: https://exemple.com/page" },
+  { value: "hash", label: "Hash", placeholder: "ex: 5f4dcc3b5aa765d61d8327deb882cf99" },
+  { value: "name", label: "Nom complet", placeholder: "ex: Jean Dupont" },
+  { value: "crypto", label: "Wallet crypto", placeholder: "ex: 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa" },
+  { value: "social_profile", label: "Profil social", placeholder: "ex: instagram.com/jdupont" },
+];
+
+// ─── Recherche avancée par formulaire structuré ─────────────────────────────
+// Sections accordéon type "état civil / coordonnées / réseaux…" : l'utilisateur
+// remplit ce qu'il sait déjà, section par section, plutôt que de tout taper
+// dans une seule barre.
+
+interface AdvField {
+  key: string;
+  label: string;
+  placeholder: string;
+  type: EntityType;
+}
+
+interface AdvSection {
+  id: string;
+  label: string;
+  icon: ReactNode;
+  fields: AdvField[];
+}
+
+const ADV_SECTIONS: AdvSection[] = [
+  {
+    id: "identite",
+    label: "État civil",
+    icon: <CircleUserRound size={18} />,
+    fields: [
+      { key: "nom", label: "Nom", placeholder: "Dupont", type: "name" },
+      { key: "prenom", label: "Prénom", placeholder: "Jean", type: "name" },
+      { key: "pseudo", label: "Nom affiché / pseudo", placeholder: "Jean Dupont", type: "username" },
+    ],
+  },
+  {
+    id: "coordonnees",
+    label: "Coordonnées",
+    icon: <Mail size={18} />,
+    fields: [
+      { key: "email", label: "Email", placeholder: "jean.dupont@email.com", type: "email" },
+      { key: "telephone", label: "Téléphone", placeholder: "+33 6 12 34 56 78", type: "phone" },
+    ],
+  },
+  {
+    id: "adresse",
+    label: "Adresse",
+    icon: <MapPin size={18} />,
+    fields: [
+      { key: "ville", label: "Ville", placeholder: "Paris", type: "location" },
+      { key: "pays", label: "Pays", placeholder: "France", type: "location" },
+    ],
+  },
+  {
+    id: "reseaux",
+    label: "Jeux & Réseaux",
+    icon: <Gamepad2 size={18} />,
+    fields: [
+      { key: "username_reseau", label: "Nom d'utilisateur", placeholder: "jdupont92", type: "username" },
+      { key: "url_profil", label: "URL du profil", placeholder: "instagram.com/jdupont", type: "url" },
+    ],
+  },
+  {
+    id: "infrastructure",
+    label: "Infrastructure",
+    icon: <Globe size={18} />,
+    fields: [
+      { key: "ip", label: "Adresse IP", placeholder: "192.168.1.1", type: "ip" },
+      { key: "domaine", label: "Domaine", placeholder: "exemple.com", type: "domain" },
+      { key: "hash", label: "Hash", placeholder: "5f4dcc3b5aa765d61d8327deb882cf99", type: "hash" },
+    ],
+  },
+  {
+    id: "autres",
+    label: "Autres données",
+    icon: <Plus size={18} />,
+    fields: [
+      { key: "crypto", label: "Wallet crypto", placeholder: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", type: "crypto" },
+      { key: "note", label: "Note libre", placeholder: "Toute autre info utile...", type: "username" },
+    ],
+  },
+];
+
+// Ordre de priorité : si plusieurs champs sont remplis, on cherche d'abord sur
+// l'identifiant le plus unique. Le backend actuel n'accepte encore qu'une
+// seule requête + un seul type — cette fonction choisit donc le "meilleur"
+// signal disponible parmi tout ce que l'utilisateur a saisi.
+function computeAdvancedPrimary(fields: Record<string, string>): { query: string; type: EntityType } | null {
+  const v = (key: string) => fields[key]?.trim() || "";
+
+  const fullName = [v("prenom"), v("nom")].filter(Boolean).join(" ");
+  const address = [v("ville"), v("pays")].filter(Boolean).join(", ");
+
+  const candidates: { type: EntityType; value: string }[] = [
+    { type: "email", value: v("email") },
+    { type: "phone", value: v("telephone") },
+    { type: "ip", value: v("ip") },
+    { type: "domain", value: v("domaine") },
+    { type: "hash", value: v("hash") },
+    { type: "crypto", value: v("crypto") },
+    { type: "url", value: v("url_profil") },
+    { type: "username", value: v("username_reseau") },
+    { type: "username", value: v("pseudo") },
+    { type: "name", value: fullName },
+    { type: "location", value: address },
+    { type: "username", value: v("note") },
+  ];
+
+  const primary = candidates.find((c) => c.value.length >= 2);
+  return primary ? { query: primary.value, type: primary.type } : null;
 }
 
 function normalizeName(value: string) {
@@ -117,13 +229,18 @@ function SearchView({
   onRefreshTables: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [searchType, setSearchType] = useState<EntityType>("email");
+  const [searchMode, setSearchMode] = useState<"quick" | "advanced">("quick");
+  const [advFields, setAdvFields] = useState<Record<string, string>>({});
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set([ADV_SECTIONS[0].id]));
   const [filter, setFilter] = useState<TrustLevel | "ALL">("ALL");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [localFilter, setLocalFilter] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "sections" | "accordion">("accordion");
   
   const search = useOsintSearch();
-  const detected = query.trim() ? detectType(query) : "";
+  const activeTypeOption = SEARCH_TYPE_OPTIONS.find((opt) => opt.value === searchType) ?? SEARCH_TYPE_OPTIONS[0];
+  const advPrimary = useMemo(() => computeAdvancedPrimary(advFields), [advFields]);
   const hasActivity = search.inProgress || Boolean(search.result);
   const searchStartRef = useRef<number>(0);
   const savedRef = useRef<string>("");
@@ -133,10 +250,35 @@ function SearchView({
     if (query.trim().length < 3 || search.inProgress) return;
     searchStartRef.current = Date.now();
     savedRef.current = "";
-    search.startSearch(query.trim(), strategy);
+    search.startSearch(query.trim(), strategy, searchType);
     setCollapsed(new Set());
     setFilter("ALL");
     setLocalFilter("");
+  };
+
+  const submitAdvanced = (e?: FormEvent) => {
+    e?.preventDefault();
+    if (!advPrimary || search.inProgress) return;
+    searchStartRef.current = Date.now();
+    savedRef.current = "";
+    search.startSearch(advPrimary.query, strategy, advPrimary.type);
+    setCollapsed(new Set());
+    setFilter("ALL");
+    setLocalFilter("");
+  };
+
+  const updateAdvField = (key: string, value: string) => {
+    setAdvFields((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const clearAdvanced = () => setAdvFields({});
+
+  const toggleSection = (id: string) => {
+    setOpenSections((cur) => {
+      const next = new Set(cur);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -196,20 +338,110 @@ function SearchView({
           </details>
         </div>
 
+        <div className="search-mode-tabs" role="tablist" aria-label="Mode de recherche">
+          <button
+            type="button" role="tab" aria-selected={searchMode === "quick"}
+            className={`search-mode-tab ${searchMode === "quick" ? "active" : ""}`}
+            onClick={() => setSearchMode("quick")}
+          >
+            Recherche rapide
+          </button>
+          <button
+            type="button" role="tab" aria-selected={searchMode === "advanced"}
+            className={`search-mode-tab ${searchMode === "advanced" ? "active" : ""}`}
+            onClick={() => setSearchMode("advanced")}
+          >
+            Recherche avancée <span className="tab-badge">NOUVEAU</span>
+          </button>
+        </div>
+
+        {searchMode === "quick" && (
         <form className="search-shell" onSubmit={submit}>
+          <label className="sr-only" htmlFor="osint-type">Type de cible</label>
+          <select
+            id="osint-type"
+            className="search-type-select"
+            value={searchType}
+            onChange={(e) => setSearchType(e.target.value as EntityType)}
+            aria-label="Type de donnée recherchée"
+          >
+            {SEARCH_TYPE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
           <Search aria-hidden="true" />
           <label className="sr-only" htmlFor="osint-query">Cible à analyser</label>
           <input
             id="osint-query" value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Email, username, IP, domaine, téléphone… (min 3 car.)"
+            placeholder={activeTypeOption.placeholder}
             autoComplete="off"
           />
-          {detected && <span className="detect-pill">{detected}</span>}
           <button type="submit" className="btn btn-gold btn-lg" disabled={query.trim().length < 3 || search.inProgress}>
             {search.inProgress ? "Analyse…" : "Rechercher"}
           </button>
         </form>
+        )}
+
+        {searchMode === "advanced" && (
+        <form className="adv-search" onSubmit={submitAdvanced}>
+          {ADV_SECTIONS.map((section) => {
+            const isOpen = openSections.has(section.id);
+            const filledCount = section.fields.filter((f) => advFields[f.key]?.trim()).length;
+            return (
+              <div className="result-window adv-search-section" key={section.id}>
+                <button
+                  type="button" className="window-header"
+                  aria-expanded={isOpen}
+                  onClick={() => toggleSection(section.id)}
+                >
+                  <div className="module-icon">{section.icon}</div>
+                  <div>
+                    <h2>{section.label}</h2>
+                  </div>
+                  {filledCount > 0 && <span className="adv-search-count">{filledCount}</span>}
+                  <ChevronDown className={isOpen ? "" : "collapsed"} />
+                </button>
+                {isOpen && (
+                  <div className="adv-search-body">
+                    {section.fields.map((field) => (
+                      <label className="adv-field" key={field.key}>
+                        <span className="adv-field-label">{field.label}</span>
+                        <span className="adv-field-input-wrap">
+                          <input
+                            value={advFields[field.key] || ""}
+                            onChange={(e) => updateAdvField(field.key, e.target.value)}
+                            placeholder={field.placeholder}
+                            autoComplete="off"
+                          />
+                          {advFields[field.key] && (
+                            <button
+                              type="button" className="adv-field-clear"
+                              onClick={() => updateAdvField(field.key, "")}
+                              aria-label={`Effacer ${field.label}`}
+                            >
+                              <X size={13} />
+                            </button>
+                          )}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <div className="adv-search-actions">
+            <button type="button" className="btn btn-glass" onClick={clearAdvanced} disabled={Object.keys(advFields).length === 0}>
+              Effacer
+            </button>
+            <button type="submit" className="btn btn-gold btn-lg" disabled={!advPrimary || search.inProgress}>
+              <Search size={16} /> {search.inProgress ? "Analyse…" : "Rechercher"}
+            </button>
+          </div>
+        </form>
+        )}
 
         <div className="search-options">
           <label htmlFor="strategy"><Settings2 /> Stratégie</label>
