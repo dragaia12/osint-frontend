@@ -233,6 +233,68 @@ button, input, select { font: inherit; }
 .adv-field-clear:hover { color: var(--gold); background: color-mix(in oklab, var(--gold) 14%, transparent); }
 .adv-search-actions { display: flex; justify-content: flex-end; gap: .6rem; margin-top: .3rem; }
 
+/* ── Fiches d'identité (résultats structurés) ────────────────────────────── */
+.identity-card {
+  border: 1px solid var(--border); border-radius: 1.1rem; overflow: hidden;
+  background: var(--glass); backdrop-filter: blur(20px) saturate(150%);
+  animation: reveal-window .6s cubic-bezier(.19,1,.22,1) both;
+}
+.identity-card-header {
+  width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+  padding: .8rem 1rem; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left;
+}
+.identity-header-spacer { flex: 1; min-width: .5rem; }
+.identity-card-name { font-family: var(--font-display); font-weight: 800; font-size: .95rem; margin-right: .3rem; }
+
+.identity-chip {
+  display: inline-flex; align-items: center; gap: .3rem;
+  border-radius: 999px; padding: .3rem .65rem;
+  font-size: .62rem; font-weight: 800; white-space: nowrap;
+  border: 1px solid var(--border); background: var(--muted); color: var(--muted-foreground);
+}
+.identity-chip-index { color: var(--gold); border-color: color-mix(in oklab, var(--gold) 30%, transparent); }
+.identity-chip-criteria { color: var(--signal); border-color: color-mix(in oklab, var(--signal) 30%, transparent); background: color-mix(in oklab, var(--signal) 10%, transparent); }
+.identity-chip-sources { color: var(--bronze); border-color: color-mix(in oklab, var(--bronze) 30%, transparent); }
+.identity-chip-rgpd { color: var(--destructive); border-color: color-mix(in oklab, var(--destructive) 35%, transparent); background: color-mix(in oklab, var(--destructive) 10%, transparent); }
+.identity-chip-family { color: var(--gold); border-color: color-mix(in oklab, var(--gold) 30%, transparent); cursor: default; }
+.identity-chip-copy { cursor: pointer; transition: all .15s ease; }
+.identity-chip-copy:hover { color: var(--gold); border-color: color-mix(in oklab, var(--gold) 35%, transparent); background: color-mix(in oklab, var(--gold) 10%, transparent); }
+
+.identity-chip-risk { gap: .4rem; }
+.identity-chip-risk .risk-dot { width: .45rem; height: .45rem; border-radius: 999px; }
+.identity-chip-risk.risk-high { color: var(--destructive); border-color: color-mix(in oklab, var(--destructive) 35%, transparent); }
+.identity-chip-risk.risk-high .risk-dot { background: var(--destructive); box-shadow: 0 0 6px var(--destructive); }
+.identity-chip-risk.risk-medium { color: var(--signal); border-color: color-mix(in oklab, var(--signal) 35%, transparent); }
+.identity-chip-risk.risk-medium .risk-dot { background: var(--signal); box-shadow: 0 0 6px var(--signal); }
+.identity-chip-risk.risk-low { color: var(--muted-foreground); }
+.identity-chip-risk.risk-low .risk-dot { background: var(--muted-foreground); }
+
+.identity-card-header > svg.collapsed { transform: rotate(-90deg); }
+.identity-card-header > svg { color: var(--muted-foreground); transition: transform .2s; flex: none; }
+
+.identity-card-grid {
+  border-top: 1px solid var(--border); padding: 1rem;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .7rem;
+  background: oklch(0 0 0 / 20%);
+}
+.identity-field {
+  display: grid; gap: .3rem; padding: .6rem .7rem;
+  border-radius: .7rem; background: var(--muted); border: 1px solid var(--border);
+}
+.identity-field-label {
+  display: flex; align-items: center; gap: .35rem;
+  font-size: .6rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--bronze);
+}
+.identity-field-value { font-size: .82rem; color: var(--foreground); word-break: break-word; }
+.identity-field-value.empty { color: var(--muted-foreground); }
+
+@media (max-width: 640px) {
+  .identity-card-header { padding: .7rem .8rem; }
+  .identity-card-name { width: 100%; order: -1; margin-bottom: .2rem; }
+  .identity-card-grid { grid-template-columns: 1fr 1fr; padding: .8rem; }
+}
+
 .search-options { margin-top: 1.1rem; display: flex; justify-content: center; align-items: center; gap: .6rem; color: var(--muted-foreground); }
 .search-options label { display: flex; align-items: center; gap: .35rem; font-size: .65rem; text-transform: uppercase; font-weight: 800; }
 .search-options label svg { width: .9rem; }
