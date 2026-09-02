@@ -33,7 +33,7 @@ export interface SearchState {
 }
 
 export interface UseSearchReturn extends SearchState {
-  startSearch: (query: string, strategy: SearchStrategy) => void;
+  startSearch: (query: string, strategy: SearchStrategy, manualType?: EntityType) => void;
   cancelSearch: () => void;
   reset: () => void;
 }
@@ -78,6 +78,12 @@ function stableStringify(value: unknown): string {
 
 // ============================================================================
 // ENTITY DETECTION
+// ============================================================================
+//
+// N'est plus utilisée automatiquement à la saisie : l'utilisateur choisit
+// désormais lui-même le type via le sélecteur manuel de la barre de recherche.
+// Cette fonction sert uniquement de repli si aucun type n'est fourni
+// (ex: appel programmatique de startSearch sans manualType).
 // ============================================================================
 
 function detectEntityType(query: string): EntityType {
@@ -266,8 +272,8 @@ function createItem(row: Row, source: string): ResultItem {
 // BUILD SEARCH RESULT
 // ============================================================================
 
-function buildSearchResult(query: string, rows: Row[]): SearchResult {
-  const inputType = detectEntityType(query);
+function buildSearchResult(query: string, rows: Row[], manualType?: EntityType): SearchResult {
+  const inputType = manualType ?? detectEntityType(query);
 
   // Normaliser et créer les items
   const completeItems: ResultItem[] = rows.map((originalRow) => {
@@ -397,7 +403,7 @@ export function useSearch(): UseSearchReturn {
     setState(INITIAL);
   }, []);
 
-  const startSearch = useCallback((query: string, _strategy: SearchStrategy) => {
+  const startSearch = useCallback((query: string, _strategy: SearchStrategy, manualType?: EntityType) => {
     const cleanQuery = query.trim();
 
     if (cleanQuery.length < 3) {
@@ -423,6 +429,7 @@ export function useSearch(): UseSearchReturn {
     void (async () => {
       try {
         const encodedQuery = encodeURIComponent(cleanQuery);
+        const typeParam = manualType ? `&type=${encodeURIComponent(manualType)}` : "";
 
         setState((previous) => ({
           ...previous,
@@ -430,10 +437,10 @@ export function useSearch(): UseSearchReturn {
           progressLabel: "Interrogation du backend...",
         }));
 
-        let response = await apiFetch(`/search?q=${encodedQuery}`, controller.signal);
+        let response = await apiFetch(`/search?q=${encodedQuery}${typeParam}`, controller.signal);
 
         if (response.status === 404) {
-          response = await apiFetch(`/api/search?query=${encodedQuery}`, controller.signal);
+          response = await apiFetch(`/api/search?query=${encodedQuery}${typeParam}`, controller.signal);
         }
 
         if (!response.ok) {
@@ -460,7 +467,7 @@ export function useSearch(): UseSearchReturn {
           progressLabel: `Traitement de ${rows.length} résultat(s)...`,
         }));
 
-        const result = buildSearchResult(cleanQuery, rows);
+        const result = buildSearchResult(cleanQuery, rows, manualType);
 
         if (cancelledRef.current) {
           return;
