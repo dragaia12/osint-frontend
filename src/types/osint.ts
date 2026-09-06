@@ -1,56 +1,10 @@
-// ============================================================================
-// TYPES OSINT — DataLyra (Optimisé v3.1)
-// ============================================================================
-
 export type EntityType =
-  | "email"
-  | "phone"
-  | "ip"
-  | "domain"
-  | "username"
-  | "url"
-  | "hash"
-  | "crypto"
-  | "name"
-  | "organization"
-  | "social_profile"
-  | "location"
-  | "document"
-  | "certificate"
-  | "mac"
-  | "iban"
-  | "credit_card"
-  | "ssn"
-  | "breach"
-  | "alert";
+  | "email" | "phone" | "ip" | "domain" | "username" | "url" | "hash" | "crypto"
+  | "name" | "organization" | "social_profile" | "location" | "document" | "certificate" | "alert";
 
-export type TrustLevel =
-  | "VERIFIED"
-  | "PROBABLE"
-  | "CANDIDATE";
-
-export type SearchStatus =
-  | "pending"
-  | "running"
-  | "done"
-  | "error"
-  | "timeout"
-  | "rate_limited";
-
-export type SearchStrategy =
-  | "balanced"
-  | "deep"
-  | "quick"
-  | "social"
-  | "infrastructure";
-
-export type UserRole =
-  | "utilisateur"
-  | "administrateur";
-
-// ============================================================================
-// DOSSIERS
-// ============================================================================
+export type TrustLevel = "VERIFIED" | "PROBABLE" | "CANDIDATE";
+export type SearchStatus = "pending" | "running" | "done" | "error";
+export type SearchStrategy = "balanced" | "deep" | "quick" | "social" | "infrastructure";
 
 export interface Dossier {
   id: string;
@@ -63,78 +17,27 @@ export interface Dossier {
   updated_at: string;
 }
 
-// ============================================================================
-// RESULTATS (Structuré & Typé)
-// ============================================================================
-
 export interface ResultItem {
-  // Core identity
+  platform?: string;
+  category?: string;
   username?: string;
   email?: string;
   phone?: string;
   name?: string;
-  platform?: string;
-  category?: string;
-
-  // Network container
-  network?: {
-    ipv4?: string;
-    ipv6?: string;
-    domain?: string;
-    subdomain?: string;
-    hostname?: string;
-    url?: string;
-  };
-
-  // Credentials container
-  credentials?: {
-    password?: string;
-    hash?: string;
-    algorithm?: "md5" | "sha1" | "sha256" | "sha512" | "bcrypt" | "plaintext";
-  };
-
-  // Location container
-  location?: {
-    address?: string;
-    street?: string;
-    city?: string;
-    state?: string;
-    region?: string;
-    country?: string;
-    zipcode?: string;
-    lat?: number;
-    lng?: number;
-  };
-
-  // Social profiles container
-  social?: {
-    facebook?: string;
-    twitter?: string;
-    instagram?: string;
-    discord?: string;
-    telegram?: string;
-    snapchat?: string;
-    tiktok?: string;
-    steam?: string;
-    roblox?: string;
-  };
-
-  // Provenance & Source tracking
-  provenance: {
-    table: string;
-    dataset: string;
-    row_idx?: number | string;
-    sources: string[];
-  };
-
-  // Trust & Metadata
+  ip?: string;
+  domain?: string;
+  url?: string;
+  password?: string;
+  hash?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  zipcode?: string;
   trust_level: TrustLevel;
-  metadata?: Record<string, unknown>;
+  sources?: string[];
+  [key: string]: unknown;
 }
-
-// ============================================================================
-// SECTIONS DE RESULTATS & PAGINATION
-// ============================================================================
 
 export interface ResultSection {
   label: string;
@@ -144,7 +47,6 @@ export interface ResultSection {
 
 export interface IdentityCard {
   name?: string;
-  total_entries?: number;
   confidence_summary?: {
     verified: number;
     probable: number;
@@ -152,29 +54,10 @@ export interface IdentityCard {
   };
 }
 
-export interface SearchResult {
-  query: string;
-  input_type: EntityType;
-  strategy: SearchStrategy;
-  status: SearchStatus;
-  elapsed_ms: number;
-  total_results: number;
-  offset: number;
-  limit: number;
-  has_more: boolean;
-  identity_card?: IdentityCard;
-  sections: ResultSection[];
-  graph?: Graph;
-}
-
-// ============================================================================
-// GRAPHE
-// ============================================================================
-
 export interface GraphNode {
   id: string;
   label: string;
-  type: EntityType;
+  type: EntityType | "query" | "alert";
   root?: boolean;
   source?: string;
   full?: string;
@@ -192,99 +75,34 @@ export interface Graph {
   edges: GraphEdge[];
 }
 
-// ============================================================================
-// ERREURS OUTILS & SYSTEME
-// ============================================================================
-
-export type ToolErrorCode =
-  | "timeout"
-  | "rate_limited"
-  | "invalid_response"
-  | "internal"
-  | "not_installed"
-  | "no_api_key";
+export interface SearchResult {
+  query: string;
+  input_type: EntityType;
+  strategy?: SearchStrategy;
+  status?: SearchStatus;
+  elapsed_ms?: number;
+  identity_card?: IdentityCard;
+  sections: ResultSection[];
+  total_results: number;
+  graph?: Graph;
+}
 
 export interface ToolError {
   tool: string;
   message: string;
-  status: ToolErrorCode;
+  status: "error" | "not_installed" | "no_api_key";
 }
-
-// ============================================================================
-// ADMINISTRATION & AUDIT
-// ============================================================================
-
-export interface AdminStats {
-  total_users: number;
-  total_dossiers: number;
-  total_recherches: number;
-  total_entites: number;
-  users_by_role: Record<string, number>;
-  recherches_today: number;
-  active_users_7d: number;
-  db_size_gb: number;
-  cache_hit_rate: number;
-  avg_response_ms: number;
-}
-
-export interface AdminUserRow {
-  id: string;
-  email: string;
-  role: UserRole;
-  created_at: string;
-  nb_dossiers: number;
-  nb_recherches: number;
-}
-
-export interface ActivityLog {
-  id: string;
-  user_id: string;
-  user_email: string;
-  action: string;
-  resource?: string;
-  created_at: string;
-  client_ip?: string;
-  user_agent?: string;
-  session_id?: string;
-}
-
-// ============================================================================
-// WEBSOCKET
-// ============================================================================
-
-export type WsMessageType =
-  | "detected"
-  | "start"
-  | "wave_start"
-  | "progress"
-  | "chain"
-  | "cache_hit"
-  | "consolidated"
-  | "results"
-  | "done"
-  | "ping"
-  | "error";
 
 export interface WsMessage {
-  type: WsMessageType;
-  targets?: Array<{
-    value: string;
-    detected_type: EntityType;
-  }>;
-  total_jobs?: number;
-  priority?: number;
-  jobs?: number;
-  tool?: string;
-  status?: string;
-  count?: number;
-  error?: string;
-  message?: string;
-  depth?: number;
+  type: string;
   query?: string;
   input_type?: EntityType;
   identity_card?: IdentityCard;
-  sections?: ResultSection[];
+  sections?: ResultSection[] | Record<string, ResultSection>;
   total_results?: number;
-  results?: Array<Record<string, unknown>>;
   graph?: Graph;
+  jobs?: number;
+  message?: string;
+  tool?: string;
+  error?: string;
 }
