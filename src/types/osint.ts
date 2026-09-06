@@ -1,5 +1,5 @@
 // ============================================================================
-// TYPES OSINT — DataLyra
+// TYPES OSINT — DataLyra (Optimisé v3.1)
 // ============================================================================
 
 export type EntityType =
@@ -16,7 +16,13 @@ export type EntityType =
   | "social_profile"
   | "location"
   | "document"
-  | "certificate";
+  | "certificate"
+  | "mac"
+  | "iban"
+  | "credit_card"
+  | "ssn"
+  | "breach"
+  | "alert";
 
 export type TrustLevel =
   | "VERIFIED"
@@ -27,7 +33,9 @@ export type SearchStatus =
   | "pending"
   | "running"
   | "done"
-  | "error";
+  | "error"
+  | "timeout"
+  | "rate_limited";
 
 export type SearchStrategy =
   | "balanced"
@@ -56,106 +64,76 @@ export interface Dossier {
 }
 
 // ============================================================================
-// RESULTATS
-// ============================================================================
-//
-// IMPORTANT :
-// Le backend peut renvoyer des colonnes supplémentaires provenant directement
-// des bases de données. L'index signature permet donc de conserver TOUTES les
-// données reçues sans erreur TypeScript.
-//
-// Exemples possibles :
-// email, username, phone, ip, address, city, country, password,
-// password_hash, dataset, row_idx, source, source_file, etc.
+// RESULTATS (Structuré & Typé)
 // ============================================================================
 
 export interface ResultItem {
-  // Champs standards
-  platform?: string;
-  category?: string;
-
-  // Identité
+  // Core identity
   username?: string;
   email?: string;
   phone?: string;
   name?: string;
+  platform?: string;
+  category?: string;
 
-  // Réseau
-  ip?: string;
-  ipv4?: string;
-  ipv6?: string;
-  domain?: string;
-  subdomain?: string;
-  hostname?: string;
-  host?: string;
-  url?: string;
+  // Network container
+  network?: {
+    ipv4?: string;
+    ipv6?: string;
+    domain?: string;
+    subdomain?: string;
+    hostname?: string;
+    url?: string;
+  };
 
-  // Sécurité / credentials
-  password?: string;
-  pass?: string;
-  pwd?: string;
-  password_hash?: string;
-  hash?: string;
-  hash_val?: string;
-  hash_value?: string;
-  md5?: string;
-  sha1?: string;
-  sha256?: string;
-  sha512?: string;
+  // Credentials container
+  credentials?: {
+    password?: string;
+    hash?: string;
+    algorithm?: "md5" | "sha1" | "sha256" | "sha512" | "bcrypt" | "plaintext";
+  };
 
-  // Localisation
-  address?: string;
-  street?: string;
-  city?: string;
-  state?: string;
-  region?: string;
-  country?: string;
-  zipcode?: string;
-  postal_code?: string;
-  latitude?: string | number;
-  longitude?: string | number;
+  // Location container
+  location?: {
+    address?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    region?: string;
+    country?: string;
+    zipcode?: string;
+    lat?: number;
+    lng?: number;
+  };
 
-  // Réseaux sociaux
-  facebook?: string;
-  instagram?: string;
-  twitter?: string;
-  x?: string;
-  discord?: string;
-  telegram?: string;
-  snapchat?: string;
-  tiktok?: string;
-  steam?: string;
-  roblox?: string;
+  // Social profiles container
+  social?: {
+    facebook?: string;
+    twitter?: string;
+    instagram?: string;
+    discord?: string;
+    telegram?: string;
+    snapchat?: string;
+    tiktok?: string;
+    steam?: string;
+    roblox?: string;
+  };
 
-  // Informations diverses
-  note?: string;
-  description?: string;
-  raw?: string;
-  source?: string;
-  source_file?: string;
-  source_data?: string;
-  dataset?: string;
-  database?: string;
-  table?: string;
-  filename?: string;
-  file?: string;
-  origin?: string;
-  row_idx?: number | string;
-  record_index?: number | string;
+  // Provenance & Source tracking
+  provenance: {
+    table: string;
+    dataset: string;
+    row_idx?: number | string;
+    sources: string[];
+  };
 
-  // Métadonnées
+  // Trust & Metadata
   trust_level: TrustLevel;
-  sources?: string[];
-
-  // --------------------------------------------------------------------------
-  // Autorise toutes les colonnes supplémentaires du backend
-  // --------------------------------------------------------------------------
-
-  [key: string]: unknown;
+  metadata?: Record<string, unknown>;
 }
 
 // ============================================================================
-// SECTIONS DE RESULTATS
+// SECTIONS DE RESULTATS & PAGINATION
 // ============================================================================
 
 export interface ResultSection {
@@ -164,18 +142,29 @@ export interface ResultSection {
   items: ResultItem[];
 }
 
-// ============================================================================
-// IDENTITE
-// ============================================================================
-
 export interface IdentityCard {
   name?: string;
-
+  total_entries?: number;
   confidence_summary?: {
     verified: number;
     probable: number;
     candidate: number;
   };
+}
+
+export interface SearchResult {
+  query: string;
+  input_type: EntityType;
+  strategy: SearchStrategy;
+  status: SearchStatus;
+  elapsed_ms: number;
+  total_results: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  identity_card?: IdentityCard;
+  sections: ResultSection[];
+  graph?: Graph;
 }
 
 // ============================================================================
@@ -185,17 +174,7 @@ export interface IdentityCard {
 export interface GraphNode {
   id: string;
   label: string;
-
-  type:
-    | "query"
-    | "email"
-    | "username"
-    | "ip"
-    | "domain"
-    | "phone"
-    | "hash"
-    | "alert";
-
+  type: EntityType;
   root?: boolean;
   source?: string;
   full?: string;
@@ -214,38 +193,25 @@ export interface Graph {
 }
 
 // ============================================================================
-// RESULTAT DE RECHERCHE
+// ERREURS OUTILS & SYSTEME
 // ============================================================================
 
-export interface SearchResult {
-  query: string;
-  input_type: EntityType;
-
-  identity_card?: IdentityCard;
-
-  sections: ResultSection[];
-
-  total_results: number;
-
-  graph?: Graph;
-}
-
-// ============================================================================
-// ERREURS OUTILS
-// ============================================================================
+export type ToolErrorCode =
+  | "timeout"
+  | "rate_limited"
+  | "invalid_response"
+  | "internal"
+  | "not_installed"
+  | "no_api_key";
 
 export interface ToolError {
   tool: string;
   message: string;
-
-  status:
-    | "error"
-    | "not_installed"
-    | "no_api_key";
+  status: ToolErrorCode;
 }
 
 // ============================================================================
-// ADMINISTRATION
+// ADMINISTRATION & AUDIT
 // ============================================================================
 
 export interface AdminStats {
@@ -253,11 +219,12 @@ export interface AdminStats {
   total_dossiers: number;
   total_recherches: number;
   total_entites: number;
-
   users_by_role: Record<string, number>;
-
   recherches_today: number;
   active_users_7d: number;
+  db_size_gb: number;
+  cache_hit_rate: number;
+  avg_response_ms: number;
 }
 
 export interface AdminUserRow {
@@ -265,14 +232,9 @@ export interface AdminUserRow {
   email: string;
   role: UserRole;
   created_at: string;
-
   nb_dossiers: number;
   nb_recherches: number;
 }
-
-// ============================================================================
-// LOGS D'ACTIVITE
-// ============================================================================
 
 export interface ActivityLog {
   id: string;
@@ -281,6 +243,9 @@ export interface ActivityLog {
   action: string;
   resource?: string;
   created_at: string;
+  client_ip?: string;
+  user_agent?: string;
+  session_id?: string;
 }
 
 // ============================================================================
@@ -302,37 +267,24 @@ export type WsMessageType =
 
 export interface WsMessage {
   type: WsMessageType;
-
   targets?: Array<{
     value: string;
     detected_type: EntityType;
   }>;
-
   total_jobs?: number;
   priority?: number;
   jobs?: number;
-
   tool?: string;
   status?: string;
   count?: number;
-
   error?: string;
   message?: string;
-
   depth?: number;
-
   query?: string;
   input_type?: EntityType;
-
   identity_card?: IdentityCard;
-
-  sections?:
-    | ResultSection[]
-    | Record<string, ResultSection>;
-
+  sections?: ResultSection[];
   total_results?: number;
-
   results?: Array<Record<string, unknown>>;
-
   graph?: Graph;
 }
