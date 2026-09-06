@@ -1,51 +1,47 @@
 import { useState, useRef, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type {
-  SearchResult,
-  SearchStrategy,
-  ToolError,
-  EntityType,
-  ResultSection,
-  ResultItem,
-  Graph,
+  SearchResult,
+  SearchStrategy,
+  ToolError,
+  EntityType,
+  ResultSection,
+  ResultItem,
+  Graph,
 } from "@/types/osint";
 
-const BACKEND_URL =
-  (
-    import.meta as unknown as {
-      env?: Record<string, string | undefined>;
-    }
-  ).env?.VITE_OSINT_BACKEND_URL ||
-  "https://strengthen-citation-scripts-informal.trycloudflare.com";
+const BACKEND_URL = (
+  import.meta as unknown as { env?: Record<string, string | undefined> }
+).env?.VITE_OSINT_BACKEND_URL || "https://strengthen-citation-scripts-informal.trycloudflare.com";
 
 const REQUEST_TIMEOUT = 30000;
 
 type Row = Record<string, unknown>;
 
 export interface SearchState {
-  inProgress: boolean;
-  progress: number;
-  progressLabel: string;
-  toolChips: Record<string, "running" | "done" | "error">;
-  result: SearchResult | null;
-  errors: ToolError[];
-  fromCache: boolean;
+  inProgress: boolean;
+  progress: number;
+  progressLabel: string;
+  toolChips: Record<string, "running" | "done" | "error">;
+  result: SearchResult | null;
+  errors: ToolError[];
+  fromCache: boolean;
 }
 
 export interface UseSearchReturn extends SearchState {
-  startSearch: (query: string, strategy: SearchStrategy, manualType?: EntityType) => void;
-  cancelSearch: () => void;
-  reset: () => void;
+  startSearch: (query: string, strategy: SearchStrategy, manualType?: EntityType) => void;
+  cancelSearch: () => void;
+  reset: () => void;
 }
 
 const INITIAL: SearchState = {
-  inProgress: false,
-  progress: 0,
-  progressLabel: "",
-  toolChips: {},
-  result: null,
-  errors: [],
-  fromCache: false,
+  inProgress: false,
+  progress: 0,
+  progressLabel: "",
+  toolChips: {},
+  result: null,
+  errors: [],
+  fromCache: false,
 };
 
 // ============================================================================
@@ -53,63 +49,55 @@ const INITIAL: SearchState = {
 // ============================================================================
 
 function isRecord(value: unknown): value is Row {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function toText(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "";
-  }
-
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return String(value).trim();
-  }
-
-  return "";
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value).trim();
+  }
+  return "";
 }
 
 function stableStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 // ============================================================================
 // ENTITY DETECTION
 // ============================================================================
+
 //
 // N'est plus utilisée automatiquement à la saisie : l'utilisateur choisit
 // désormais lui-même le type via le sélecteur manuel de la barre de recherche.
 // Cette fonction sert uniquement de repli si aucun type n'est fourni
 // (ex: appel programmatique de startSearch sans manualType).
-// ============================================================================
-
+//
 function detectEntityType(query: string): EntityType {
-  const value = query.trim();
-
-  if (/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(value)) {
-    return "email";
-  }
-
-  if (/^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/.test(value)) {
-    return "ip";
-  }
-
-  if (/^[0-9a-fA-F]{32,128}$/.test(value)) {
-    return "hash";
-  }
-
-  if (/^\+?[0-9\s().-]{7,20}$/.test(value)) {
-    return "phone";
-  }
-
-  if (/^(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/.test(value) && !value.includes("@")) {
-    return "domain";
-  }
-
-  return "username";
+  const value = query.trim();
+  if (/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(value)) {
+    return "email";
+  }
+  if (/^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/.test(value)) {
+    return "ip";
+  }
+  if (/^[0-9a-fA-F]{32,128}$/.test(value)) {
+    return "hash";
+  }
+  if (/^\+?[0-9\s().-]{7,20}$/.test(value)) {
+    return "phone";
+  }
+  if (/^(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/.test(value) && !value.includes("@")) {
+    return "domain";
+  }
+  return "username";
 }
 
 // ============================================================================
@@ -117,35 +105,30 @@ function detectEntityType(query: string): EntityType {
 // ============================================================================
 
 function extractRows(data: unknown): Row[] {
-  if (Array.isArray(data)) {
-    return data.filter(isRecord);
-  }
-
-  if (!isRecord(data)) {
-    return [];
-  }
-
-  const possibleKeys = ["results", "data", "records", "rows", "items", "matches", "hits"];
-
-  for (const key of possibleKeys) {
-    const value = data[key];
-    if (Array.isArray(value)) {
-      return value.filter(isRecord);
-    }
-  }
-
-  if (
-    "email" in data ||
-    "username" in data ||
-    "phone" in data ||
-    "ip" in data ||
-    "dataset" in data ||
-    "row_idx" in data
-  ) {
-    return [data];
-  }
-
-  return [];
+  if (Array.isArray(data)) {
+    return data.filter(isRecord);
+  }
+  if (!isRecord(data)) {
+    return [];
+  }
+  const possibleKeys = ["results", "data", "records", "rows", "items", "matches", "hits"];
+  for (const key of possibleKeys) {
+    const value = data[key];
+    if (Array.isArray(value)) {
+      return value.filter(isRecord);
+    }
+  }
+  if (
+    "email" in data ||
+    "username" in data ||
+    "phone" in data ||
+    "ip" in data ||
+    "dataset" in data ||
+    "row_idx" in data
+  ) {
+    return [data];
+  }
+  return [];
 }
 
 // ============================================================================
@@ -153,30 +136,26 @@ function extractRows(data: unknown): Row[] {
 // ============================================================================
 
 function normalizeRow(row: Row): Row {
-  const normalized: Row = {};
-
-  for (const [key, value] of Object.entries(row)) {
-    normalized[key] = value;
-  }
-
-  const sourceData = row.source_data;
-
-  if (typeof sourceData === "string") {
-    try {
-      const parsed: unknown = JSON.parse(sourceData);
-      if (isRecord(parsed)) {
-        for (const [key, value] of Object.entries(parsed)) {
-          if (!(key in normalized)) {
-            normalized[key] = value;
-          }
-        }
-      }
-    } catch {
-      // Ce n'est pas du JSON : on conserve source_data tel quel.
-    }
-  }
-
-  return normalized;
+  const normalized: Row = {};
+  for (const [key, value] of Object.entries(row)) {
+    normalized[key] = value;
+  }
+  const sourceData = row.source_data;
+  if (typeof sourceData === "string") {
+    try {
+      const parsed: unknown = JSON.parse(sourceData);
+      if (isRecord(parsed)) {
+        for (const [key, value] of Object.entries(parsed)) {
+          if (!(key in normalized)) {
+            normalized[key] = value;
+          }
+        }
+      }
+    } catch {
+      // Ce n'est pas du JSON : on conserve source_data tel quel.
+    }
+  }
+  return normalized;
 }
 
 // ============================================================================
@@ -184,40 +163,39 @@ function normalizeRow(row: Row): Row {
 // ============================================================================
 
 function getField(row: Row, names: string[]): string {
-  for (const name of names) {
-    if (name in row) {
-      const value = toText(row[name]);
-      if (value) {
-        return value;
-      }
-    }
-
-    const matchingKey = Object.keys(row).find((key) => key.toLowerCase() === name.toLowerCase());
-
-    if (matchingKey) {
-      const value = toText(row[matchingKey]);
-      if (value) {
-        return value;
-      }
-    }
-  }
-
-  return "";
+  for (const name of names) {
+    if (name in row) {
+      const value = toText(row[name]);
+      if (value) {
+        return value;
+      }
+    }
+    const matchingKey = Object.keys(row).find(
+      (key) => key.toLowerCase() === name.toLowerCase()
+    );
+    if (matchingKey) {
+      const value = toText(row[matchingKey]);
+      if (value) {
+        return value;
+      }
+    }
+  }
+  return "";
 }
 
 function getSource(row: Row): string {
-  return (
-    getField(row, [
-      "source",
-      "source_file",
-      "filename",
-      "file",
-      "dataset",
-      "table",
-      "database",
-      "origin",
-    ]) || "Database"
-  );
+  return (
+    getField(row, [
+      "source",
+      "source_file",
+      "filename",
+      "file",
+      "dataset",
+      "table",
+      "database",
+      "origin",
+    ]) || "Database"
+  );
 }
 
 // ============================================================================
@@ -225,19 +203,17 @@ function getSource(row: Row): string {
 // ============================================================================
 
 function deduplicateRows(rows: Row[]): Row[] {
-  const seen = new Set<string>();
-  const output: Row[] = [];
-
-  for (const row of rows) {
-    const key = stableStringify(row);
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    output.push(row);
-  }
-
-  return output;
+  const seen = new Set<string>();
+  const output: Row[] = [];
+  for (const row of rows) {
+    const key = stableStringify(row);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    output.push(row);
+  }
+  return output;
 }
 
 // ============================================================================
@@ -245,102 +221,103 @@ function deduplicateRows(rows: Row[]): Row[] {
 // ============================================================================
 
 function createItem(row: Row, source: string): ResultItem {
-  // Créer un objet avec toutes les propriétés nécessaires
-  const item: ResultItem = {
-    // Propriétés requises par ResultItem
-    platform: toText(row.platform) || source,
-    category: toText(row.category) || "backend",
-    source: toText(row.source) || source,
-    sources: Array.isArray(row.sources)
-      ? row.sources.filter((value): value is string => typeof value === "string")
-      : [source],
-    trust_level: (toText(row.trust_level) as ResultItem["trust_level"]) || "VERIFIED",
-  };
+  // Créer un objet avec toutes les propriétés nécessaires
+  const item: ResultItem = {
+    // Propriétés requises par ResultItem
+    platform: toText(row.platform) || source,
+    category: toText(row.category) || "backend",
+    source: toText(row.source) || source,
+    sources: Array.isArray(row.sources)
+      ? row.sources.filter((value): value is string => typeof value === "string")
+      : [source],
+    trust_level: (toText(row.trust_level) as ResultItem["trust_level"]) || "VERIFIED",
+  };
 
-  // Ajouter toutes les propriétés supplémentaires de la ligne
-  for (const [key, value] of Object.entries(row)) {
-    // Ne pas écraser les propriétés déjà définies
-    if (!(key in item)) {
-      (item as Record<string, unknown>)[key] = value;
-    }
-  }
-
-  return item;
+  // Ajouter toutes les propriétés supplémentaires de la ligne
+  for (const [key, value] of Object.entries(row)) {
+    // Ne pas écraser les propriétés déjà définies
+    if (!(key in item)) {
+      (item as Record<string, unknown>)[key] = value;
+    }
+  }
+  return item;
 }
 
 // ============================================================================
 // BUILD SEARCH RESULT
 // ============================================================================
 
-function buildSearchResult(query: string, rows: Row[], manualType?: EntityType): SearchResult {
-  const inputType = manualType ?? detectEntityType(query);
+function buildSearchResult(
+  query: string,
+  rows: Row[],
+  manualType?: EntityType
+): SearchResult {
+  const inputType = manualType ?? detectEntityType(query);
 
-  // Normaliser et créer les items
-  const completeItems: ResultItem[] = rows.map((originalRow) => {
-    const row = normalizeRow(originalRow);
-    const source = getSource(row);
-    return createItem(row, source);
-  });
+  // Normaliser et créer les items
+  const completeItems: ResultItem[] = rows.map((originalRow) => {
+    const row = normalizeRow(originalRow);
+    const source = getSource(row);
+    return createItem(row, source);
+  });
 
-  // Dédupliquer
-  const seen = new Set<string>();
-  const uniqueItems: ResultItem[] = [];
+  // Dédupliquer
+  const seen = new Set<string>();
+  const uniqueItems: ResultItem[] = [];
+  for (const item of completeItems) {
+    const key = stableStringify(item);
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueItems.push(item);
+    }
+  }
 
-  for (const item of completeItems) {
-    const key = stableStringify(item);
-    if (!seen.has(key)) {
-      seen.add(key);
-      uniqueItems.push(item);
-    }
-  }
+  // Calculer les statistiques de confiance
+  let verified = 0;
+  let probable = 0;
+  let candidate = 0;
 
-  // Calculer les statistiques de confiance
-  let verified = 0;
-  let probable = 0;
-  let candidate = 0;
+  for (const item of uniqueItems) {
+    const trust = toText(item.trust_level).toUpperCase();
+    if (trust === "VERIFIED") {
+      verified++;
+    } else if (trust === "PROBABLE") {
+      probable++;
+    } else {
+      candidate++;
+    }
+  }
 
-  for (const item of uniqueItems) {
-    const trust = toText(item.trust_level).toUpperCase();
-    if (trust === "VERIFIED") {
-      verified++;
-    } else if (trust === "PROBABLE") {
-      probable++;
-    } else {
-      candidate++;
-    }
-  }
+  // Construire les sections
+  const sections: ResultSection[] = [];
+  if (uniqueItems.length > 0) {
+    sections.push({
+      label: "Résultats complets",
+      icon: "📂",
+      items: uniqueItems,
+    });
+  }
 
-  // Construire les sections
-  const sections: ResultSection[] = [];
+  const graph: Graph = {
+    nodes: [],
+    edges: [],
+  };
 
-  if (uniqueItems.length > 0) {
-    sections.push({
-      label: "Résultats complets",
-      icon: "📂",
-      items: uniqueItems,
-    });
-  }
-
-  const graph: Graph = {
-    nodes: [],
-    edges: [],
-  };
-
-  return {
-    query,
-    input_type: inputType,
-    identity_card: {
-      name: query,
-      confidence_summary: {
-        verified,
-        probable,
-        candidate,
-      },
-    },
-    sections,
-    total_results: uniqueItems.length,
-    graph,
-  };
+  return {
+    query,
+    input_type: inputType,
+    identity_card: {
+      name: query,
+      confidence_summary: {
+        verified,
+        probable,
+        candidate,
+      },
+    },
+    sections,
+    total_results: uniqueItems.length,
+    graph,
+  };
 }
 
 // ============================================================================
@@ -348,34 +325,31 @@ function buildSearchResult(query: string, rows: Row[], manualType?: EntityType):
 // ============================================================================
 
 async function apiFetch(path: string, signal: AbortSignal): Promise<Response> {
-  const timeoutController = new AbortController();
+  const timeoutController = new AbortController();
+  const timeoutId = window.setTimeout(() => {
+    timeoutController.abort();
+  }, REQUEST_TIMEOUT);
 
-  const timeoutId = window.setTimeout(() => {
-    timeoutController.abort();
-  }, REQUEST_TIMEOUT);
+  const abortHandler = () => {
+    timeoutController.abort();
+  };
+  signal.addEventListener("abort", abortHandler, { once: true });
 
-  const abortHandler = () => {
-    timeoutController.abort();
-  };
-
-  signal.addEventListener("abort", abortHandler, { once: true });
-
-  try {
-    const { data } = await supabase.auth.getSession();
-    const token = data.session?.access_token || "";
-
-    return await fetch(`${BACKEND_URL}${path}`, {
-      method: "GET",
-      signal: timeoutController.signal,
-      headers: {
-        Accept: "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-  } finally {
-    window.clearTimeout(timeoutId);
-    signal.removeEventListener("abort", abortHandler);
-  }
+  try {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token || "";
+    return await fetch(`${BACKEND_URL}${path}`, {
+      method: "GET",
+      signal: timeoutController.signal,
+      headers: {
+        Accept: "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+    signal.removeEventListener("abort", abortHandler);
+  }
 }
 
 // ============================================================================
@@ -383,162 +357,154 @@ async function apiFetch(path: string, signal: AbortSignal): Promise<Response> {
 // ============================================================================
 
 export function useSearch(): UseSearchReturn {
-  const [state, setState] = useState<SearchState>(INITIAL);
-  const cancelledRef = useRef(false);
-  const controllerRef = useRef<AbortController | null>(null);
+  const [state, setState] = useState<SearchState>(INITIAL);
+  const cancelledRef = useRef(false);
+  const controllerRef = useRef<AbortController | null>(null);
 
-  const cancelSearch = useCallback(() => {
-    cancelledRef.current = true;
-    controllerRef.current?.abort();
-    setState((previous) => ({
-      ...previous,
-      inProgress: false,
-      progressLabel: "Recherche annulée",
-    }));
-  }, []);
+  const cancelSearch = useCallback(() => {
+    cancelledRef.current = true;
+    controllerRef.current?.abort();
+    setState((previous) => ({
+      ...previous,
+      inProgress: false,
+      progressLabel: "Recherche annulée",
+    }));
+  }, []);
 
-  const reset = useCallback(() => {
-    cancelledRef.current = true;
-    controllerRef.current?.abort();
-    setState(INITIAL);
-  }, []);
+  const reset = useCallback(() => {
+    cancelledRef.current = true;
+    controllerRef.current?.abort();
+    setState(INITIAL);
+  }, []);
 
-  const startSearch = useCallback((query: string, _strategy: SearchStrategy, manualType?: EntityType) => {
-    const cleanQuery = query.trim();
+  const startSearch = useCallback(
+    (query: string, _strategy: SearchStrategy, manualType?: EntityType) => {
+      const cleanQuery = query.trim();
+      if (cleanQuery.length < 3) {
+        return;
+      }
 
-    if (cleanQuery.length < 3) {
-      return;
-    }
+      controllerRef.current?.abort();
+      cancelledRef.current = false;
+      const controller = new AbortController();
+      controllerRef.current = controller;
 
-    controllerRef.current?.abort();
-    cancelledRef.current = false;
+      setState({
+        inProgress: true,
+        progress: 10,
+        progressLabel: "Connexion au moteur de recherche...",
+        toolChips: { local: "running" },
+        result: null,
+        errors: [],
+        fromCache: false,
+      });
 
-    const controller = new AbortController();
-    controllerRef.current = controller;
+      void (async () => {
+        try {
+          const encodedQuery = encodeURIComponent(cleanQuery);
+          const typeParam = manualType ? `&type=${encodeURIComponent(manualType)}` : "";
 
-    setState({
-      inProgress: true,
-      progress: 10,
-      progressLabel: "Connexion au moteur de recherche...",
-      toolChips: { local: "running" },
-      result: null,
-      errors: [],
-      fromCache: false,
-    });
+          setState((previous) => ({
+            ...previous,
+            progress: 25,
+            progressLabel: "Interrogation du backend...",
+          }));
 
-    void (async () => {
-      try {
-        const encodedQuery = encodeURIComponent(cleanQuery);
-        const typeParam = manualType ? `&type=${encodeURIComponent(manualType)}` : "";
+          let response = await apiFetch(`/search?q=${encodedQuery}${typeParam}`, controller.signal);
+          if (response.status === 404) {
+            response = await apiFetch(`/api/search?query=${encodedQuery}${typeParam}`, controller.signal);
+          }
 
-        setState((previous) => ({
-          ...previous,
-          progress: 25,
-          progressLabel: "Interrogation du backend...",
-        }));
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
 
-        let response = await apiFetch(`/search?q=${encodedQuery}${typeParam}`, controller.signal);
+          setState((previous) => ({
+            ...previous,
+            progress: 50,
+            progressLabel: "Réception des données...",
+          }));
 
-        if (response.status === 404) {
-          response = await apiFetch(`/api/search?query=${encodedQuery}${typeParam}`, controller.signal);
-        }
+          const data: unknown = await response.json();
+          if (cancelledRef.current) {
+            return;
+          }
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
+          const rows = extractRows(data);
+          setState((previous) => ({
+            ...previous,
+            progress: 70,
+            progressLabel: `Traitement de ${rows.length} résultat(s)...`,
+          }));
 
-        setState((previous) => ({
-          ...previous,
-          progress: 50,
-          progressLabel: "Réception des données...",
-        }));
+          const result = buildSearchResult(cleanQuery, rows, manualType);
+          if (cancelledRef.current) {
+            return;
+          }
 
-        const data: unknown = await response.json();
+          const cached = isRecord(data) ? Boolean(data.cached || data.from_cache) : false;
 
-        if (cancelledRef.current) {
-          return;
-        }
+          if (import.meta.env.DEV) {
+            console.log("[OSINT] Backend response:", data);
+            console.log("[OSINT] Extracted rows:", rows);
+            console.log("[OSINT] Number of columns:", rows.length > 0 ? Object.keys(rows[0]).length : 0);
+            if (rows.length > 0) {
+              console.log("[OSINT] First row columns:", Object.keys(rows[0]));
+            }
+          }
 
-        const rows = extractRows(data);
+          setState((previous) => ({
+            ...previous,
+            inProgress: false,
+            progress: 100,
+            progressLabel: rows.length > 0 ? `${rows.length} résultat(s) trouvé(s)` : "Aucun résultat trouvé",
+            toolChips: { ...previous.toolChips, local: "done" },
+            result,
+            fromCache: cached,
+          }));
+        } catch (error: unknown) {
+          if (cancelledRef.current || controller.signal.aborted) {
+            return;
+          }
+          const message =
+            error instanceof Error
+              ? error.name === "AbortError"
+                ? "La requête a expiré"
+                : error.message
+              : "Erreur de liaison avec le backend";
 
-        setState((previous) => ({
-          ...previous,
-          progress: 70,
-          progressLabel: `Traitement de ${rows.length} résultat(s)...`,
-        }));
+          console.error("[OSINT] Erreur:", message);
 
-        const result = buildSearchResult(cleanQuery, rows, manualType);
+          setState((previous) => ({
+            ...previous,
+            inProgress: false,
+            progress: 0,
+            progressLabel: "Erreur de recherche",
+            toolChips: { ...previous.toolChips, local: "error" },
+            errors: [
+              {
+                tool: "local",
+                message,
+                status: "error",
+              },
+            ],
+          }));
+        } finally {
+          if (controllerRef.current === controller) {
+            controllerRef.current = null;
+          }
+        }
+      })();
+    },
+    []
+  );
 
-        if (cancelledRef.current) {
-          return;
-        }
-
-        const cached = isRecord(data) ? Boolean(data.cached || data.from_cache) : false;
-
-        if (import.meta.env.DEV) {
-          console.log("[OSINT] Backend response:", data);
-          console.log("[OSINT] Extracted rows:", rows);
-          console.log("[OSINT] Number of columns:", rows.length > 0 ? Object.keys(rows[0]).length : 0);
-          if (rows.length > 0) {
-            console.log("[OSINT] First row columns:", Object.keys(rows[0]));
-          }
-        }
-
-        setState((previous) => ({
-          ...previous,
-          inProgress: false,
-          progress: 100,
-          progressLabel: rows.length > 0 ? `${rows.length} résultat(s) trouvé(s)` : "Aucun résultat trouvé",
-          toolChips: { ...previous.toolChips, local: "done" },
-          result,
-          fromCache: cached,
-        }));
-      } catch (error: unknown) {
-        if (cancelledRef.current || controller.signal.aborted) {
-          return;
-        }
-
-        const message =
-          error instanceof Error
-            ? error.name === "AbortError"
-              ? "La requête a expiré"
-              : error.message
-            : "Erreur de liaison avec le backend";
-
-        console.error("[OSINT] Erreur:", message);
-
-        setState((previous) => ({
-          ...previous,
-          inProgress: false,
-          progress: 0,
-          progressLabel: "Erreur de recherche",
-          toolChips: { ...previous.toolChips, local: "error" },
-          errors: [
-            {
-              tool: "local",
-              message,
-              status: "error",
-            },
-          ],
-        }));
-      } finally {
-        if (controllerRef.current === controller) {
-          controllerRef.current = null;
-        }
-      }
-    })();
-  }, []);
-
-  return {
-    ...state,
-    startSearch,
-    cancelSearch,
-    reset,
-  };
+  return {
+    ...state,
+    startSearch,
+    cancelSearch,
+    reset,
+  };
 }
 
 export { useSearch as useOsintSearch };
-
-
-hop deja voila
-fait un truc clean dans l'esprit de mon site
