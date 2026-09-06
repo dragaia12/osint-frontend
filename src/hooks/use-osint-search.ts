@@ -79,12 +79,6 @@ function stableStringify(value: unknown): string {
 // ============================================================================
 // ENTITY DETECTION
 // ============================================================================
-//
-// N'est plus utilisée automatiquement à la saisie : l'utilisateur choisit
-// désormais lui-même le type via le sélecteur manuel de la barre de recherche.
-// Cette fonction sert uniquement de repli si aucun type n'est fourni
-// (ex: appel programmatique de startSearch sans manualType).
-// ============================================================================
 
 function detectEntityType(query: string): EntityType {
   const value = query.trim();
@@ -140,7 +134,8 @@ function extractRows(data: unknown): Row[] {
     "phone" in data ||
     "ip" in data ||
     "dataset" in data ||
-    "row_idx" in data
+    "row_idx" in data ||
+    "_table" in data
   ) {
     return [data];
   }
@@ -149,30 +144,55 @@ function extractRows(data: unknown): Row[] {
 }
 
 // ============================================================================
-// NORMALISATION
+// NORMALISATION & GESTION DES OBJETS IMBRIQUÉS (CAF / JSON)
 // ============================================================================
+
+function flattenObject(obj: Record<string, unknown>, prefix = ""): Record<string, unknown> {
+  const flattened: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(obj)) {
+    const newKey = prefix ? `${prefix}_${key}` : key;
+    if (isRecord(value)) {
+      Object.assign(flattened, flattenObject(value, newKey));
+    } else {
+      flattened[newKey] = value;
+    }
+  }
+
+  return flattened;
+}
 
 function normalizeRow(row: Row): Row {
   const normalized: Row = {};
 
+  // Copie de base
   for (const [key, value] of Object.entries(row)) {
-    normalized[key] = value;
+    if (isRecord(value)) {
+      // Si la valeur est un objet (ex: objet allocataire CAF), on aplatit intelligemment
+      const flattened = flattenObject(value, key);
+      for (const [fKey, fVal] of Object.entries(flattened)) {
+        normalized[fKey] = fVal;
+      }
+    } else {
+      normalized[key] = value;
+    }
   }
 
+  // Gestion du cas où source_data contient une chaîne JSON brute
   const sourceData = row.source_data;
-
   if (typeof sourceData === "string") {
     try {
       const parsed: unknown = JSON.parse(sourceData);
       if (isRecord(parsed)) {
-        for (const [key, value] of Object.entries(parsed)) {
+        const flattenedParsed = flattenObject(parsed);
+        for (const [key, value] of Object.entries(flattenedParsed)) {
           if (!(key in normalized)) {
             normalized[key] = value;
           }
         }
       }
     } catch {
-      // Ce n'est pas du JSON : on conserve source_data tel quel.
+      // Ce n'est pas du JSON valide, on conserve tel quel
     }
   }
 
@@ -208,6 +228,7 @@ function getField(row: Row, names: string[]): string {
 function getSource(row: Row): string {
   return (
     getField(row, [
+      "_table",
       "source",
       "source_file",
       "filename",
@@ -221,33 +242,11 @@ function getSource(row: Row): string {
 }
 
 // ============================================================================
-// DEDUPLICATION
-// ============================================================================
-
-function deduplicateRows(rows: Row[]): Row[] {
-  const seen = new Set<string>();
-  const output: Row[] = [];
-
-  for (const row of rows) {
-    const key = stableStringify(row);
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    output.push(row);
-  }
-
-  return output;
-}
-
-// ============================================================================
 // CREATE ITEM
 // ============================================================================
 
 function createItem(row: Row, source: string): ResultItem {
-  // Créer un objet avec toutes les propriétés nécessaires
   const item: ResultItem = {
-    // Propriétés requises par ResultItem
     platform: toText(row.platform) || source,
     category: toText(row.category) || "backend",
     source: toText(row.source) || source,
@@ -257,9 +256,7 @@ function createItem(row: Row, source: string): ResultItem {
     trust_level: (toText(row.trust_level) as ResultItem["trust_level"]) || "VERIFIED",
   };
 
-  // Ajouter toutes les propriétés supplémentaires de la ligne
   for (const [key, value] of Object.entries(row)) {
-    // Ne pas écraser les propriétés déjà définies
     if (!(key in item)) {
       (item as Record<string, unknown>)[key] = value;
     }
@@ -269,20 +266,19 @@ function createItem(row: Row, source: string): ResultItem {
 }
 
 // ============================================================================
-// BUILD SEARCH RESULT
+// BUILD SEARCH RESULT AVEC REGROUPEMENT PAR DATASET / TABLE
 // ============================================================================
 
 function buildSearchResult(query: string, rows: Row[], manualType?: EntityType): SearchResult {
   const inputType = manualType ?? detectEntityType(query);
 
-  // Normaliser et créer les items
   const completeItems: ResultItem[] = rows.map((originalRow) => {
     const row = normalizeRow(originalRow);
     const source = getSource(row);
     return createItem(row, source);
   });
 
-  // Dédupliquer
+  // Déduplication optimisée via un Set de chaînes stables
   const seen = new Set<string>();
   const uniqueItems: ResultItem[] = [];
 
@@ -294,7 +290,7 @@ function buildSearchResult(query: string, rows: Row[], manualType?: EntityType):
     }
   }
 
-  // Calculer les statistiques de confiance
+  // Statistiques de confiance
   let verified = 0;
   let probable = 0;
   let candidate = 0;
@@ -310,14 +306,34 @@ function buildSearchResult(query: string, rows: Row[], manualType?: EntityType):
     }
   }
 
-  // Construire les sections
+  // Regroupement dynamique par Source/Table (ex: caf_data, etat_civil, snapchat_users...)
+  const groupedBySource: Record<string, ResultItem[]> = {};
+
+  for (const item of uniqueItems) {
+    const src = toText(item.source) || toText(item._table) || "Autres sources";
+    if (!groupedBySource[src]) {
+      groupedBySource[src] = [];
+    }
+    groupedBySource[src].push(item);
+  }
+
   const sections: ResultSection[] = [];
 
+  // Section globale unifiée
   if (uniqueItems.length > 0) {
     sections.push({
-      label: "Résultats complets",
-      icon: "📂",
+      label: "Tous les résultats",
+      icon: "Layers",
       items: uniqueItems,
+    });
+  }
+
+  // Sections spécifiques par dataset pour un affichage propre et cloisonné dans l'UI
+  for (const [sourceName, sourceItems] => of Object.entries(groupedBySource)) {
+    sections.push({
+      label: sourceName.toUpperCase(),
+      icon: sourceName.includes("caf") ? "Building2" : sourceName.includes("snapchat") ? "Camera" : "Database",
+      items: sourceItems,
     });
   }
 
@@ -344,7 +360,7 @@ function buildSearchResult(query: string, rows: Row[], manualType?: EntityType):
 }
 
 // ============================================================================
-// API FETCH
+// API FETCH AVEC FALLBACKS ROBUSTES
 // ============================================================================
 
 async function apiFetch(path: string, signal: AbortSignal): Promise<Response> {
@@ -379,7 +395,7 @@ async function apiFetch(path: string, signal: AbortSignal): Promise<Response> {
 }
 
 // ============================================================================
-// HOOK
+// HOOK PRINCIPAL
 // ============================================================================
 
 export function useSearch(): UseSearchReturn {
@@ -406,7 +422,7 @@ export function useSearch(): UseSearchReturn {
   const startSearch = useCallback((query: string, _strategy: SearchStrategy, manualType?: EntityType) => {
     const cleanQuery = query.trim();
 
-    if (cleanQuery.length < 3) {
+    if (cleanQuery.length < 2) {
       return;
     }
 
@@ -418,9 +434,9 @@ export function useSearch(): UseSearchReturn {
 
     setState({
       inProgress: true,
-      progress: 10,
-      progressLabel: "Connexion au moteur de recherche...",
-      toolChips: { local: "running" },
+      progress: 15,
+      progressLabel: "Connexion au cluster DuckDB...",
+      toolChips: { backend: "running" },
       result: null,
       errors: [],
       fromCache: false,
@@ -433,8 +449,8 @@ export function useSearch(): UseSearchReturn {
 
         setState((previous) => ({
           ...previous,
-          progress: 25,
-          progressLabel: "Interrogation du backend...",
+          progress: 35,
+          progressLabel: "Interrogation des tables OSINT...",
         }));
 
         let response = await apiFetch(`/search?q=${encodedQuery}${typeParam}`, controller.signal);
@@ -444,13 +460,13 @@ export function useSearch(): UseSearchReturn {
         }
 
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          throw new Error(`Erreur serveur HTTP ${response.status}`);
         }
 
         setState((previous) => ({
           ...previous,
-          progress: 50,
-          progressLabel: "Réception des données...",
+          progress: 65,
+          progressLabel: "Réception et structuration du flux...",
         }));
 
         const data: unknown = await response.json();
@@ -463,8 +479,8 @@ export function useSearch(): UseSearchReturn {
 
         setState((previous) => ({
           ...previous,
-          progress: 70,
-          progressLabel: `Traitement de ${rows.length} résultat(s)...`,
+          progress: 85,
+          progressLabel: `Traitement de ${rows.length} entrée(s)...`,
         }));
 
         const result = buildSearchResult(cleanQuery, rows, manualType);
@@ -475,21 +491,12 @@ export function useSearch(): UseSearchReturn {
 
         const cached = isRecord(data) ? Boolean(data.cached || data.from_cache) : false;
 
-        if (import.meta.env.DEV) {
-          console.log("[OSINT] Backend response:", data);
-          console.log("[OSINT] Extracted rows:", rows);
-          console.log("[OSINT] Number of columns:", rows.length > 0 ? Object.keys(rows[0]).length : 0);
-          if (rows.length > 0) {
-            console.log("[OSINT] First row columns:", Object.keys(rows[0]));
-          }
-        }
-
         setState((previous) => ({
           ...previous,
           inProgress: false,
           progress: 100,
-          progressLabel: rows.length > 0 ? `${rows.length} résultat(s) trouvé(s)` : "Aucun résultat trouvé",
-          toolChips: { ...previous.toolChips, local: "done" },
+          progressLabel: rows.length > 0 ? `${rows.length} résultat(s) indexé(s)` : "Aucune correspondance trouvée",
+          toolChips: { ...previous.toolChips, backend: "done" },
           result,
           fromCache: cached,
         }));
@@ -501,21 +508,19 @@ export function useSearch(): UseSearchReturn {
         const message =
           error instanceof Error
             ? error.name === "AbortError"
-              ? "La requête a expiré"
+              ? "Délai d'attente dépassé (Timeout)"
               : error.message
-            : "Erreur de liaison avec le backend";
-
-        console.error("[OSINT] Erreur:", message);
+            : "Erreur de communication avec l'API";
 
         setState((previous) => ({
           ...previous,
           inProgress: false,
           progress: 0,
-          progressLabel: "Erreur de recherche",
-          toolChips: { ...previous.toolChips, local: "error" },
+          progressLabel: "Échec de la recherche",
+          toolChips: { ...previous.toolChips, backend: "error" },
           errors: [
             {
-              tool: "local",
+              tool: "backend",
               message,
               status: "error",
             },
