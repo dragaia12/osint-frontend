@@ -3,14 +3,14 @@ import { useOsintSearch } from "@/hooks/use-osint-search";
 import { ResultItem, ResultSection } from "@/types/osint";
 
 export function OsintApp() {
-  const { search, results, status, error } = useOsintSearch();
+  const { startSearch, result, inProgress, errors } = useOsintSearch();
   const [query, setQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"table" | "grouped" | "accordion">("accordion");
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (query.trim()) {
-      search(query);
+    if (query.trim() && !inProgress) {
+      startSearch(query, "deep", "username");
     }
   };
 
@@ -31,27 +31,28 @@ export function OsintApp() {
         />
         <button
           type="submit"
-          className="bg-amber-500 hover:bg-amber-600 text-neutral-950 font-semibold px-6 py-2 rounded-lg text-sm transition-colors"
+          disabled={inProgress}
+          className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-neutral-950 font-semibold px-6 py-2 rounded-lg text-sm transition-colors"
         >
-          Analyser
+          {inProgress ? "Recherche..." : "Analyser"}
         </button>
       </form>
 
-      {status === "running" && (
+      {inProgress && (
         <div className="text-amber-500 text-sm mb-4">Recherche en cours...</div>
       )}
 
-      {error && (
+      {errors.length > 0 && (
         <div className="bg-red-950/50 border border-red-800 text-red-200 p-4 rounded-lg mb-4 text-sm">
-          {error}
+          {errors[0].message}
         </div>
       )}
 
-      {results && (
+      {result && (
         <div className="space-y-6">
           <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
             <h2 className="text-lg font-semibold mb-2">Cible analysée</h2>
-            <p className="text-2xl font-bold text-amber-400">{results.query}</p>
+            <p className="text-2xl font-bold text-amber-400">{result.query}</p>
           </div>
 
           <div className="flex gap-2 border-b border-neutral-800 pb-2">
@@ -71,7 +72,7 @@ export function OsintApp() {
           </div>
 
           <div className="space-y-4">
-            {results.sections.map((sec: ResultSection, secIndex: number) => (
+            {result.sections.map((sec: ResultSection, secIndex: number) => (
               <div key={secIndex} className="bg-neutral-900 border border-neutral-800 rounded-xl p-6">
                 <h3 className="text-md font-semibold text-amber-400 mb-4">{sec.label}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -80,14 +81,14 @@ export function OsintApp() {
                       {item.name && <div className="text-sm font-bold text-neutral-200">{item.name}</div>}
                       {item.email && <div className="text-xs text-neutral-400">Email: {item.email}</div>}
                       {item.phone && <div className="text-xs text-neutral-400">Téléphone: {item.phone}</div>}
-                      {item.location?.city && (
-                        <div className="text-xs text-neutral-400">Ville: {item.location.city}</div>
+                      {typeof item.city === "string" && (
+                        <div className="text-xs text-neutral-400">Ville: {item.city}</div>
                       )}
-                      {item.location?.zipcode && (
-                        <div className="text-xs text-neutral-400">Code postal: {item.location.zipcode}</div>
+                      {typeof item.zipcode === "string" && (
+                        <div className="text-xs text-neutral-400">Code postal: {item.zipcode}</div>
                       )}
                       <div className="text-[10px] text-neutral-500 uppercase tracking-wider pt-2 border-t border-neutral-900">
-                        Source: {item.provenance?.dataset || "Inconnu"}
+                        Source: {String(item.dataset || item.source || "Inconnu")}
                       </div>
                     </div>
                   ))}
