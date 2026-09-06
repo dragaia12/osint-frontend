@@ -43,8 +43,6 @@ export function useOsintSearch() {
             status: "done",
             elapsed_ms: 0,
             total_results: msg.total_results || 0,
-            offset: 0,
-            limit: 50,
             has_more: false,
             identity_card: msg.identity_card,
             sections: (msg.sections as any) || [],
