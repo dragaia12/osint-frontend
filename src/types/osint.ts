@@ -6,6 +6,8 @@ export type TrustLevel = "VERIFIED" | "PROBABLE" | "CANDIDATE";
 export type SearchStatus = "pending" | "running" | "done" | "error";
 export type SearchStrategy = "balanced" | "deep" | "quick" | "social" | "infrastructure";
 
+export type UserRole = "admin" | "analyst" | "guest";
+
 export interface Dossier {
   id: string;
   user_id: string;
@@ -84,6 +86,7 @@ export interface SearchResult {
   identity_card?: IdentityCard;
   sections: ResultSection[];
   total_results: number;
+  has_more?: boolean;
   graph?: Graph;
 }
 
