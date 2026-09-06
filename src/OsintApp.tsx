@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useOsintSearch } from "@/hooks/use-osint-search";
-import { SearchStatus, ResultItem, ResultSection } from "@/types/osint";
+import { ResultItem, ResultSection } from "@/types/osint";
 
 export function OsintApp() {
   const { search, results, status, error } = useOsintSearch();
@@ -83,8 +83,8 @@ export function OsintApp() {
                       {item.location?.city && (
                         <div className="text-xs text-neutral-400">Ville: {item.location.city}</div>
                       )}
-                      {item.location?.department && (
-                        <div className="text-xs text-neutral-400">Département: {item.location.department}</div>
+                      {item.location?.zipcode && (
+                        <div className="text-xs text-neutral-400">Code postal: {item.location.zipcode}</div>
                       )}
                       <div className="text-[10px] text-neutral-500 uppercase tracking-wider pt-2 border-t border-neutral-900">
                         Source: {item.provenance?.dataset || "Inconnu"}
