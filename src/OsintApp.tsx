@@ -64,6 +64,7 @@ const ADV_SECTIONS: AdvSection[] = [
     fields: [
       { key: "nom", label: "Nom", placeholder: "Dupont", type: "name" },
       { key: "prenom", label: "Prénom", placeholder: "Jean", type: "name" },
+      { key: "date_naissance", label: "Date de naissance", placeholder: "JJ/MM/AAAA", type: "name" },
       { key: "pseudo", label: "Nom affiché / pseudo", placeholder: "Jean Dupont", type: "username" },
     ],
   },
@@ -115,33 +116,281 @@ const ADV_SECTIONS: AdvSection[] = [
   },
 ];
 
-// Ordre de priorité : si plusieurs champs sont remplis, on cherche d'abord sur
-// l'identifiant le plus unique. Le backend actuel n'accepte encore qu'une
-// seule requête + un seul type — cette fonction choisit donc le "meilleur"
-// signal disponible parmi tout ce que l'utilisateur a saisi.
-function computeAdvancedPrimary(fields: Record<string, string>): { query: string; type: EntityType } | null {
-  const v = (key: string) => fields[key]?.trim() || "";
+interface AdvancedCriteria {
+  nom?: string;
+  prenom?: string;
+  date_naissance?: string;
+  pseudo?: string;
+  email?: string;
+  telephone?: string;
+  ville?: string;
+  pays?: string;
+  username_reseau?: string;
+  url_profil?: string;
+  ip?: string;
+  domaine?: string;
+  hash?: string;
+  crypto?: string;
+  note?: string;
+}
 
-  const fullName = [v("prenom"), v("nom")].filter(Boolean).join(" ");
-  const address = [v("ville"), v("pays")].filter(Boolean).join(", ");
+const ADVANCED_FIELD_ORDER = [
+  "nom", "prenom", "date_naissance", "genre", "adresse", "ville", "code_postal", "pays",
+  "telephone", "email", "username", "username_reseau", "pseudo", "url_profil", "ip",
+  "domain", "domaine", "subdomain", "hash", "hash_val", "crypto", "note", "description",
+];
 
-  const candidates: { type: EntityType; value: string }[] = [
-    { type: "email", value: v("email") },
-    { type: "phone", value: v("telephone") },
-    { type: "ip", value: v("ip") },
-    { type: "domain", value: v("domaine") },
-    { type: "hash", value: v("hash") },
-    { type: "crypto", value: v("crypto") },
-    { type: "url", value: v("url_profil") },
-    { type: "username", value: v("username_reseau") },
-    { type: "username", value: v("pseudo") },
-    { type: "name", value: fullName },
-    { type: "location", value: address },
-    { type: "username", value: v("note") },
-  ];
+function normalizeSearchText(value: unknown): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  const primary = candidates.find((c) => c.value.length >= 2);
-  return primary ? { query: primary.value, type: primary.type } : null;
+function normalizePhone(value: unknown): string {
+  return String(value ?? "").replace(/\D/g, "");
+}
+
+function normalizeDate(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const iso = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
+  const fr = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (fr) return `${fr[3]}-${fr[2].padStart(2, "0")}-${fr[1].padStart(2, "0")}`;
+  return normalizeSearchText(raw);
+}
+
+function getAdvancedCriteria(fields: Record<string, string>): AdvancedCriteria {
+  return Object.fromEntries(
+    Object.entries(fields)
+      .map(([key, value]) => [key, value.trim()])
+      .filter(([, value]) => Boolean(value))
+  ) as AdvancedCriteria;
+}
+
+function advancedCriteriaToQuery(criteria: AdvancedCriteria): string {
+  const labels: Record<string, string> = {
+    nom: "Nom", prenom: "Prénom", date_naissance: "Date de naissance", pseudo: "Pseudo",
+    email: "Email", telephone: "Téléphone", ville: "Ville", pays: "Pays",
+    username_reseau: "Username", url_profil: "Profil", ip: "IP", domaine: "Domaine",
+    hash: "Hash", crypto: "Wallet", note: "Note",
+  };
+  return Object.entries(criteria)
+    .map(([key, value]) => `${labels[key] || key}=${value}`)
+    .join(" · ");
+}
+
+function getItemField(item: any, key: string): unknown {
+  if (item?.[key] !== undefined && item?.[key] !== null) return item[key];
+  if (item?.data?.[key] !== undefined && item?.data?.[key] !== null) return item.data[key];
+  if (item?.raw && typeof item.raw === "object" && item.raw?.[key] !== undefined) return item.raw[key];
+  return undefined;
+}
+
+function collectItemValues(item: any, keys: string[]): string[] {
+  const values: string[] = [];
+  const add = (v: unknown) => {
+    if (Array.isArray(v)) v.forEach(add);
+    else if (v !== undefined && v !== null && String(v).trim()) values.push(String(v));
+  };
+  keys.forEach((key) => add(getItemField(item, key)));
+  return values;
+}
+
+function getStrongIdentityTokens(item: any): string[] {
+  const tokens: string[] = [];
+  const add = (prefix: string, value: unknown, normalizer = normalizeSearchText) => {
+    if (value === undefined || value === null || !String(value).trim()) return;
+    const normalized = normalizer(value);
+    if (normalized) tokens.push(`${prefix}:${normalized}`);
+  };
+
+  add("email", getItemField(item, "email"));
+  add("phone", getItemField(item, "telephone"), normalizePhone);
+  add("phone", getItemField(item, "phone"), normalizePhone);
+  add("username", getItemField(item, "username"));
+  add("username", getItemField(item, "username_reseau"));
+  add("username", getItemField(item, "pseudo"));
+  add("url", getItemField(item, "url"));
+  add("url", getItemField(item, "url_profil"));
+  add("ip", getItemField(item, "ip"));
+  add("hash", getItemField(item, "hash"));
+  add("hash", getItemField(item, "hash_val"));
+  add("crypto", getItemField(item, "crypto"));
+
+  const nom = getItemField(item, "nom");
+  const prenom = getItemField(item, "prenom");
+  const naissance = getItemField(item, "date_naissance");
+  const ville = getItemField(item, "ville");
+  if (nom && prenom) {
+    const name = `${normalizeSearchText(prenom)}|${normalizeSearchText(nom)}`;
+    if (naissance) add("person", `${name}|${normalizeDate(naissance)}`);
+    else if (ville) add("person", `${name}|${normalizeSearchText(ville)}`);
+    else tokens.push(`person:${name}`);
+  }
+
+  return Array.from(new Set(tokens));
+}
+
+function getItemIdentity(item: any): string {
+  const tokens = getStrongIdentityTokens(item);
+  if (tokens.length) {
+    // Prefer the strongest available identifier so that records from different
+    // sources can still be consolidated when they describe the same entity.
+    const priority = ["email:", "phone:", "hash:", "crypto:", "url:", "username:", "person:", "ip:"];
+    for (const prefix of priority) {
+      const token = tokens.find((t) => t.startsWith(prefix));
+      if (token) return token;
+    }
+    return tokens[0];
+  }
+  const source = normalizeSearchText(item?.source_data || item?.platform || item?.source || "");
+  const raw = normalizeSearchText(typeof item?.raw === "string" ? item.raw : JSON.stringify(item?.raw ?? item));
+  return `${source}|${raw}`;
+}
+
+function mergeResultItems(items: any[]): any[] {
+  if (!items.length) return [];
+
+  const parent = items.map((_, i) => i);
+  const find = (x: number): number => {
+    let root = x;
+    while (parent[root] !== root) root = parent[root];
+    while (parent[x] !== x) {
+      const next = parent[x];
+      parent[x] = root;
+      x = next;
+    }
+    return root;
+  };
+  const union = (a: number, b: number) => {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent[rb] = ra;
+  };
+
+  const tokenOwners = new Map<string, number>();
+  items.forEach((item, index) => {
+    for (const token of getStrongIdentityTokens(item)) {
+      const owner = tokenOwners.get(token);
+      if (owner !== undefined) union(owner, index);
+      else tokenOwners.set(token, index);
+    }
+  });
+
+  const groups = new Map<number, any[]>();
+  items.forEach((item, index) => {
+    const root = find(index);
+    const list = groups.get(root) ?? [];
+    list.push(item);
+    groups.set(root, list);
+  });
+
+  const trustRank: Record<string, number> = { CANDIDATE: 1, PROBABLE: 2, VERIFIED: 3 };
+
+  return Array.from(groups.values()).map((group) => {
+    const combined = { ...group[0] };
+    for (const item of group.slice(1)) {
+      for (const [field, value] of Object.entries(item)) {
+        if (value === undefined || value === null || value === "") continue;
+        if (combined[field] === undefined || combined[field] === null || combined[field] === "") {
+          combined[field] = value;
+        } else if (Array.isArray(combined[field]) || Array.isArray(value)) {
+          const left = Array.isArray(combined[field]) ? combined[field] : [combined[field]];
+          const right = Array.isArray(value) ? value : [value];
+          combined[field] = Array.from(new Set([...left, ...right].map(String)));
+        }
+      }
+    }
+
+    const sources = Array.from(new Set(group.flatMap((item) => {
+      const values = [item.source_data, item.platform, item.source, item.sources].flat(Infinity);
+      return values.filter(Boolean).map(String);
+    })));
+    if (sources.length) combined.sources = sources;
+
+    const bestTrust = group.reduce((best, item) => {
+      const trust = item?.trust_level || "CANDIDATE";
+      return (trustRank[trust] || 0) > (trustRank[best] || 0) ? trust : best;
+    }, "CANDIDATE");
+    combined.trust_level = bestTrust;
+    combined._duplicate_count = group.length;
+    combined._sources_count = sources.length;
+    return combined;
+  });
+}
+
+function sortNormalizedItems(items: any[]): any[] {
+  const fieldRank = (item: any) => {
+    for (let i = 0; i < ADVANCED_FIELD_ORDER.length; i++) {
+      if (getItemField(item, ADVANCED_FIELD_ORDER[i])) return i;
+    }
+    return ADVANCED_FIELD_ORDER.length;
+  };
+
+  return [...items].sort((a, b) => {
+    const trustRank: Record<string, number> = { VERIFIED: 0, PROBABLE: 1, CANDIDATE: 2 };
+    const trustDiff = (trustRank[a?.trust_level] ?? 3) - (trustRank[b?.trust_level] ?? 3);
+    if (trustDiff) return trustDiff;
+    return fieldRank(a) - fieldRank(b);
+  });
+}
+
+function normalizeAdvancedResult(result: any, criteria: AdvancedCriteria): SearchResult {
+  const sections = Array.isArray(result?.sections) ? result.sections : [];
+  const rawItems = sections.flatMap((section: any) => Array.isArray(section?.items) ? section.items : []);
+  const items = sortNormalizedItems(mergeResultItems(rawItems));
+  const query = result?.query || advancedCriteriaToQuery(criteria);
+
+  const identitySource = items.find((item) =>
+    getItemField(item, "nom") || getItemField(item, "prenom") || getItemField(item, "date_naissance")
+  );
+  const existingIdentity = result?.identity_card || {};
+  const identity_card = {
+    ...existingIdentity,
+    name: existingIdentity.name || [getItemField(identitySource, "prenom"), getItemField(identitySource, "nom")].filter(Boolean).join(" ") || undefined,
+    nom: existingIdentity.nom || getItemField(identitySource, "nom"),
+    prenom: existingIdentity.prenom || getItemField(identitySource, "prenom"),
+    date_naissance: existingIdentity.date_naissance || getItemField(identitySource, "date_naissance"),
+    ville: existingIdentity.ville || getItemField(identitySource, "ville"),
+    confidence_summary: existingIdentity.confidence_summary || {
+      verified: items.filter((i) => i?.trust_level === "VERIFIED").length,
+      probable: items.filter((i) => i?.trust_level === "PROBABLE").length,
+      candidate: items.filter((i) => i?.trust_level === "CANDIDATE").length,
+    },
+  };
+
+  const sectionRank = (section: any) => {
+    const label = normalizeSearchText(section?.label || "");
+    if (label.includes("ident") || label.includes("etat civil")) return 0;
+    if (label.includes("coord")) return 1;
+    if (label.includes("adress") || label.includes("local")) return 2;
+    if (label.includes("reseau") || label.includes("social") || label.includes("jeu")) return 3;
+    if (label.includes("infra")) return 4;
+    return 5;
+  };
+
+  const rebuiltSections = sections
+    .map((section: any) => ({
+      ...section,
+      items: sortNormalizedItems(mergeResultItems(Array.isArray(section?.items) ? section.items : [])),
+    }))
+    .filter((section: any) => section.items.length > 0)
+    .sort((a: any, b: any) => sectionRank(a) - sectionRank(b));
+
+  if (!rebuiltSections.length && items.length) {
+    rebuiltSections.push({ label: "Résultats consolidés", items });
+  }
+
+  return {
+    ...result,
+    query,
+    identity_card,
+    sections: rebuiltSections,
+  } as SearchResult;
 }
 
 function normalizeName(value: string) {
@@ -211,7 +460,12 @@ function getRowType(item: any) {
 }
 
 function getRowValue(item: any) {
-  return item.email || item.username || item.ip || item.subdomain || item.domain || item.note || item.hash_val || item.hash || "—";
+  const fullName = [getItemField(item, "prenom"), getItemField(item, "nom")].filter(Boolean).join(" ");
+  const birthDate = getItemField(item, "date_naissance");
+  const city = getItemField(item, "ville");
+  return [fullName, birthDate, city, item.email, item.telephone || item.phone, item.username, item.ip, item.subdomain, item.domain, item.note, item.hash_val, item.hash]
+    .filter(Boolean)
+    .join(" · ") || "—";
 }
 
 /* ─── Search View ─────────────────────────────────────────────────────────── */
@@ -237,17 +491,28 @@ function SearchView({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [localFilter, setLocalFilter] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "sections" | "accordion">("accordion");
+  const [advancedResult, setAdvancedResult] = useState<SearchResult | null>(null);
+  const [advancedInProgress, setAdvancedInProgress] = useState(false);
+  const [advancedProgress, setAdvancedProgress] = useState(0);
+  const [advancedError, setAdvancedError] = useState("");
+  const advancedAbortRef = useRef<AbortController | null>(null);
   
   const search = useOsintSearch();
   const activeTypeOption = SEARCH_TYPE_OPTIONS.find((opt) => opt.value === searchType) ?? SEARCH_TYPE_OPTIONS[0];
-  const advPrimary = useMemo(() => computeAdvancedPrimary(advFields), [advFields]);
-  const hasActivity = search.inProgress || Boolean(search.result);
+  const advancedCriteria = useMemo(() => getAdvancedCriteria(advFields), [advFields]);
+  const activeResult = advancedResult ?? search.result;
+  const activeInProgress = advancedInProgress || search.inProgress;
+  const activeProgress = advancedInProgress ? advancedProgress : search.progress;
+  const hasActivity = activeInProgress || Boolean(activeResult);
   const searchStartRef = useRef<number>(0);
   const savedRef = useRef<string>("");
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
-    if (query.trim().length < 3 || search.inProgress) return;
+    if (query.trim().length < 3 || activeInProgress) return;
+    advancedAbortRef.current?.abort();
+    setAdvancedResult(null);
+    setAdvancedError("");
     searchStartRef.current = Date.now();
     savedRef.current = "";
     search.startSearch(query.trim(), strategy, searchType);
@@ -256,15 +521,45 @@ function SearchView({
     setLocalFilter("");
   };
 
-  const submitAdvanced = (e?: FormEvent) => {
+  const submitAdvanced = async (e?: FormEvent) => {
     e?.preventDefault();
-    if (!advPrimary || search.inProgress) return;
+    const filled = Object.keys(advancedCriteria).length;
+    if (!filled || activeInProgress) return;
+
+    advancedAbortRef.current?.abort();
+    const controller = new AbortController();
+    advancedAbortRef.current = controller;
     searchStartRef.current = Date.now();
     savedRef.current = "";
-    search.startSearch(advPrimary.query, strategy, advPrimary.type);
+    setAdvancedResult(null);
+    setAdvancedError("");
+    setAdvancedInProgress(true);
+    setAdvancedProgress(5);
     setCollapsed(new Set());
     setFilter("ALL");
     setLocalFilter("");
+
+    try {
+      setAdvancedProgress(15);
+      const normalized = await fetchAdvancedSearch(advancedCriteria, strategy, controller.signal, setAdvancedProgress);
+      setAdvancedProgress(100);
+      setAdvancedResult(normalized);
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setAdvancedError(error instanceof Error ? error.message : "Recherche avancée impossible.");
+    } finally {
+      if (advancedAbortRef.current === controller) {
+        advancedAbortRef.current = null;
+        setAdvancedInProgress(false);
+      }
+    }
+  };
+
+  const cancelAdvanced = () => {
+    advancedAbortRef.current?.abort();
+    advancedAbortRef.current = null;
+    setAdvancedInProgress(false);
+    setAdvancedProgress(0);
   };
 
   const updateAdvField = (key: string, value: string) => {
@@ -282,17 +577,17 @@ function SearchView({
   };
 
   useEffect(() => {
-    if (!search.result || search.inProgress) return;
-    if (savedRef.current === search.result.query) return;
-    savedRef.current = search.result.query;
+    if (!activeResult || activeInProgress) return;
+    if (savedRef.current === activeResult.query) return;
+    savedRef.current = activeResult.query;
     const duration = Date.now() - searchStartRef.current;
-    saveSearchResult(search.result as SearchResult, duration).catch(() => {});
-  }, [search.result, search.inProgress]);
+    saveSearchResult(activeResult as SearchResult, duration).catch(() => {});
+  }, [activeResult, activeInProgress]);
 
   const allItems = useMemo(() => {
-    if (!search.result) return [];
-    return search.result.sections.flatMap((s: any) => s.items);
-  }, [search.result]);
+    if (!activeResult) return [];
+    return sortNormalizedItems(mergeResultItems(activeResult.sections.flatMap((s: any) => s.items)));
+  }, [activeResult]);
 
   const filteredItems = useMemo(() => {
     return allItems.filter((item: any) => {
@@ -377,8 +672,8 @@ function SearchView({
             placeholder={activeTypeOption.placeholder}
             autoComplete="off"
           />
-          <button type="submit" className="btn btn-gold btn-lg" disabled={query.trim().length < 3 || search.inProgress}>
-            {search.inProgress ? "Analyse…" : "Rechercher"}
+          <button type="submit" className="btn btn-gold btn-lg" disabled={query.trim().length < 3 || activeInProgress}>
+            {activeInProgress ? "Analyse…" : "Rechercher"}
           </button>
         </form>
         )}
@@ -432,12 +727,19 @@ function SearchView({
             );
           })}
 
+          {Object.keys(advancedCriteria).length > 0 && (
+            <div className="adv-criteria-summary" aria-live="polite">
+              <span><strong>{Object.keys(advancedCriteria).length}</strong> critère{Object.keys(advancedCriteria).length > 1 ? "s" : ""} actif{Object.keys(advancedCriteria).length > 1 ? "s" : ""}</span>
+              <span>Correspondance : <strong>TOUS les critères</strong></span>
+            </div>
+          )}
+
           <div className="adv-search-actions">
             <button type="button" className="btn btn-glass" onClick={clearAdvanced} disabled={Object.keys(advFields).length === 0}>
               Effacer
             </button>
-            <button type="submit" className="btn btn-gold btn-lg" disabled={!advPrimary || search.inProgress}>
-              <Search size={16} /> {search.inProgress ? "Analyse…" : "Rechercher"}
+            <button type="submit" className="btn btn-gold btn-lg" disabled={Object.keys(advancedCriteria).length === 0 || activeInProgress}>
+              <Search size={16} /> {activeInProgress ? "Analyse…" : "Rechercher"}
             </button>
           </div>
         </form>
@@ -448,8 +750,8 @@ function SearchView({
           <select id="strategy" value={strategy} onChange={(e) => setStrategy(e.target.value as SearchStrategy)}>
             {Object.entries(strategyLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
-          {search.inProgress && (
-            <button className="btn btn-glass btn-sm" onClick={search.cancelSearch}>Arrêter</button>
+          {activeInProgress && (
+            <button className="btn btn-glass btn-sm" onClick={advancedInProgress ? cancelAdvanced : search.cancelSearch}>Arrêter</button>
           )}
         </div>
 
@@ -457,11 +759,11 @@ function SearchView({
           <div className="results-flow">
             <div className="progress-glass" aria-live="polite">
               <div className="progress-header">
-                <span>{search.progressLabel || "Initialisation des modules"}</span>
-                <strong>{search.progress}%</strong>
+                <span>{advancedInProgress ? "Recherche multicritère · consolidation des résultats" : (search.progressLabel || "Initialisation des modules")}</span>
+                <strong>{activeProgress}%</strong>
               </div>
-              <div className="progress-track"><span style={{ width: `${search.progress}%` }} /></div>
-              {Object.keys(search.toolChips).length > 0 && (
+              <div className="progress-track"><span style={{ width: `${activeProgress}%` }} /></div>
+              {!advancedInProgress && Object.keys(search.toolChips).length > 0 && (
                 <div className="tool-stream">
                   {Object.entries(search.toolChips).map(([tool, status]) => (
                     <span key={tool} data-status={status}>{normalizeName(tool)}</span>
@@ -470,17 +772,17 @@ function SearchView({
               )}
             </div>
 
-            {search.errors.length > 0 && (
+            {(advancedError || search.errors.length > 0) && (
               <div className="error-glass">
                 <TriangleAlert />
                 <div>
-                  <strong>{search.errors.length} module(s) indisponible(s)</strong>
-                  <p>{search.errors.map((e: any) => `${normalizeName(e.tool)} : ${e.message}`).join(" · ")}</p>
+                  <strong>{advancedError ? "Recherche avancée indisponible" : `${search.errors.length} module(s) indisponible(s)`}</strong>
+                  <p>{advancedError || search.errors.map((e: any) => `${normalizeName(e.tool)} : ${e.message}`).join(" · ")}</p>
                 </div>
               </div>
             )}
 
-            {search.result?.identity_card && (
+            {activeResult?.identity_card && (
               <article className="result-window identity-window">
                 <header>
                   <div className="module-icon">ID</div>
@@ -488,23 +790,33 @@ function SearchView({
                     <h2>Identité numérique</h2>
                     <p>Profil consolidé à partir des sources corrélées</p>
                   </div>
-                  <TrustBadge level={(search.result.identity_card.confidence_summary?.verified ?? 0) > 0 ? "VERIFIED" : "PROBABLE"} />
+                  <TrustBadge level={(activeResult.identity_card.confidence_summary?.verified ?? 0) > 0 ? "VERIFIED" : "PROBABLE"} />
                 </header>
                 <div className="identity-content">
                   <div className="id-main">
                     <span className="id-label">Cible analysée</span>
-                    <strong className="id-name">{search.result.identity_card.name || search.result.query}</strong>
+                    <strong className="id-name">{activeResult.identity_card.name || [getItemField(activeResult.identity_card, "prenom"), getItemField(activeResult.identity_card, "nom")].filter(Boolean).join(" ") || activeResult.query}</strong>
+                    <div className="identity-priority-fields">
+                      {[
+                        ["Nom", getItemField(activeResult.identity_card, "nom")],
+                        ["Prénom", getItemField(activeResult.identity_card, "prenom")],
+                        ["Date de naissance", getItemField(activeResult.identity_card, "date_naissance")],
+                        ["Ville", getItemField(activeResult.identity_card, "ville")],
+                      ].filter(([, value]) => value).map(([label, value]) => (
+                        <span key={String(label)}><b>{label}</b>{String(value)}</span>
+                      ))}
+                    </div>
                   </div>
                   <div className="confidence-grid">
-                    <span><b>{search.result.identity_card.confidence_summary?.verified ?? 0}</b> vérifiés</span>
-                    <span><b>{search.result.identity_card.confidence_summary?.probable ?? 0}</b> probables</span>
-                    <span><b>{search.result.identity_card.confidence_summary?.candidate ?? 0}</b> candidats</span>
+                    <span><b>{activeResult.identity_card.confidence_summary?.verified ?? 0}</b> vérifiés</span>
+                    <span><b>{activeResult.identity_card.confidence_summary?.probable ?? 0}</b> probables</span>
+                    <span><b>{activeResult.identity_card.confidence_summary?.candidate ?? 0}</b> candidats</span>
                   </div>
                 </div>
               </article>
             )}
 
-            {search.result && (
+            {activeResult && (
               <div className="result-controls-bar">
                 <div className="view-mode-toggle">
                   <button 
@@ -532,7 +844,7 @@ function SearchView({
               </div>
             )}
 
-            {search.result && viewMode === "table" && (
+            {activeResult && viewMode === "table" && (
               <article className="result-window">
                 <div className="window-header" style={{ borderBottom: "1px solid var(--border)", cursor: "default" }}>
                   <div className="module-icon">📋</div>
@@ -607,7 +919,7 @@ function SearchView({
               </article>
             )}
 
-            {search.result && viewMode === "accordion" && (
+            {activeResult && viewMode === "accordion" && (
               <div style={{ marginTop: "1rem" }}>
                 <LogAccordionList
                   title="Résultats d'investigation détaillés"
@@ -616,7 +928,7 @@ function SearchView({
               </div>
             )}
 
-            {viewMode === "sections" && search.result?.sections.map((section: any, idx: number) => {
+            {viewMode === "sections" && activeResult?.sections.map((section: any, idx: number) => {
               const items = section.items.filter((item: any) => filter === "ALL" || item.trust_level === filter);
               if (!items.length) return null;
               const isCollapsed = collapsed.has(section.label);
@@ -643,9 +955,9 @@ function SearchView({
               );
             })}
 
-            {search.result?.graph && <GraphView graph={search.result.graph} />}
+            {activeResult?.graph && <GraphView graph={activeResult.graph} />}
 
-            {search.result && (
+            {activeResult && (
               <div className="result-actions">
                 <div className="filter-group">
                   {(["ALL", "VERIFIED", "PROBABLE", "CANDIDATE"] as const).map((level) => (
@@ -659,10 +971,10 @@ function SearchView({
                   ))}
                 </div>
                 <div>
-                  <button className="btn btn-glass" onClick={() => exportResult(search.result as SearchResult, "csv")}>
+                  <button className="btn btn-glass" onClick={() => exportResult(activeResult as SearchResult, "csv")}>
                     <Download /> CSV
                   </button>
-                  <button className="btn btn-glass" style={{ marginLeft: ".5rem" }} onClick={() => exportResult(search.result as SearchResult, "md")}>
+                  <button className="btn btn-glass" style={{ marginLeft: ".5rem" }} onClick={() => exportResult(activeResult as SearchResult, "md")}>
                     <Download /> Obsidian
                   </button>
                 </div>
@@ -1061,15 +1373,33 @@ function GraphView({ graph }: { graph: Graph }) {
 }
 
 function ResultRow({ item }: { item: ResultItem }) {
-  const identity = item.username || item.email || item.ip || item.subdomain || item.note || item.description || "Signal détecté";
+  const firstName = getItemField(item, "prenom");
+  const lastName = getItemField(item, "nom");
+  const birthDate = getItemField(item, "date_naissance");
+  const city = getItemField(item, "ville");
+  const identity = [firstName, lastName].filter(Boolean).join(" ") || item.username || item.email || item.ip || item.subdomain || item.note || item.description || "Signal détecté";
+  const priority = [
+    ["Nom", lastName],
+    ["Prénom", firstName],
+    ["Date de naissance", birthDate],
+    ["Ville", city],
+  ].filter(([, value]) => value);
+
   return (
     <div className="result-row">
       <div>
         <strong>{normalizeName(item.platform || item.category || "Source")}</strong>
-        {item.url
-          ? <a href={item.url} target="_blank" rel="noreferrer">{identity}</a>
-          : <span>{identity}</span>
-        }
+        <div className="result-primary-line">
+          {item.url
+            ? <a href={item.url} target="_blank" rel="noreferrer">{identity}</a>
+            : <span>{identity}</span>
+          }
+        </div>
+        {priority.length > 0 && (
+          <div className="result-priority-fields">
+            {priority.map(([label, value]) => <span key={String(label)}><b>{label} :</b> {String(value)}</span>)}
+          </div>
+        )}
       </div>
       <TrustBadge level={item.trust_level || "CANDIDATE"} />
     </div>
@@ -1271,6 +1601,137 @@ async function apiFetch(path: string, options?: RequestInit): Promise<Response> 
       ...(options?.headers ?? {}),
     },
   });
+}
+
+const ADVANCED_FIELD_TYPES: Record<string, EntityType> = {
+  nom: "name",
+  prenom: "name",
+  date_naissance: "name",
+  pseudo: "username",
+  email: "email",
+  telephone: "phone",
+  ville: "location",
+  pays: "location",
+  username_reseau: "username",
+  url_profil: "url",
+  ip: "ip",
+  domaine: "domain",
+  hash: "hash",
+  crypto: "crypto",
+  note: "username",
+};
+
+async function fetchSearchForCriterion(key: string, value: string, strategy: SearchStrategy, signal: AbortSignal): Promise<SearchResult> {
+  const type = ADVANCED_FIELD_TYPES[key] || "name";
+  const params = new URLSearchParams({ query: value, type, strategy });
+  const response = await apiFetch(`/api/search?${params.toString()}`, { signal });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+function itemMatchesCriterion(item: any, key: string, wanted: string): boolean {
+  const aliases: Record<string, string[]> = {
+    nom: ["nom", "last_name", "lastname", "surname"],
+    prenom: ["prenom", "first_name", "firstname", "given_name"],
+    date_naissance: ["date_naissance", "birth_date", "birthdate", "dob"],
+    pseudo: ["pseudo", "username", "display_name", "name"],
+    email: ["email", "mail"],
+    telephone: ["telephone", "phone", "mobile", "tel"],
+    ville: ["ville", "city", "locality"],
+    pays: ["pays", "country"],
+    username_reseau: ["username", "username_reseau", "handle", "pseudo"],
+    url_profil: ["url", "url_profil", "profile_url", "link"],
+    ip: ["ip", "ip_address"],
+    domaine: ["domain", "domaine", "hostname"],
+    hash: ["hash", "hash_val", "password_hash"],
+    crypto: ["crypto", "wallet", "address"],
+    note: ["note", "description", "raw"],
+  };
+  const wantedNorm = key === "telephone" ? normalizePhone(wanted) : key === "date_naissance" ? normalizeDate(wanted) : normalizeSearchText(wanted);
+  const values = collectItemValues(item, aliases[key] || [key]);
+  return values.some((value) => {
+    const candidate = key === "telephone" ? normalizePhone(value) : key === "date_naissance" ? normalizeDate(value) : normalizeSearchText(value);
+    return candidate === wantedNorm || candidate.includes(wantedNorm) || wantedNorm.includes(candidate);
+  });
+}
+
+function intersectAdvancedResults(results: Array<{ key: string; value: string; result: SearchResult }>, criteria: AdvancedCriteria): SearchResult {
+  if (!results.length) return normalizeAdvancedResult({ query: advancedCriteriaToQuery(criteria), sections: [] }, criteria);
+
+  // Start from the smallest result set to reduce work, then keep only records
+  // that satisfy every criterion. This is a frontend safety net when the backend
+  // does not yet expose /api/search/advanced.
+  const ordered = [...results].sort((a, b) => {
+    const ac = a.result.sections?.reduce((n: number, s: any) => n + (s.items?.length || 0), 0) || 0;
+    const bc = b.result.sections?.reduce((n: number, s: any) => n + (s.items?.length || 0), 0) || 0;
+    return ac - bc;
+  });
+
+  const baseItems = ordered[0].result.sections?.flatMap((s: any) => s.items || []) || [];
+  const matching = baseItems.filter((item: any) =>
+    results.every(({ key, value }) => itemMatchesCriterion(item, key, value))
+  );
+
+  // If the sources returned slightly different shapes, also try identity-based
+  // consolidation across all result sets. An entity must be represented in every
+  // criterion result before it is promoted to the final AND result.
+  const candidateGroups = new Map<string, any[]>();
+  results.forEach(({ result }) => {
+    const items = result.sections?.flatMap((s: any) => s.items || []) || [];
+    items.forEach((item: any) => {
+      const key = getItemIdentity(item);
+      const group = candidateGroups.get(key) || [];
+      group.push(item);
+      candidateGroups.set(key, group);
+    });
+  });
+
+  const identityMatching = Array.from(candidateGroups.values())
+    .filter((group) => group.length >= results.length)
+    .map((group) => mergeResultItems(group)[0])
+    .filter((item) => results.every(({ key, value }) => itemMatchesCriterion(item, key, value)));
+
+  const items = sortNormalizedItems(mergeResultItems([...matching, ...identityMatching]));
+  return normalizeAdvancedResult({
+    query: advancedCriteriaToQuery(criteria),
+    sections: [{ label: "Résultats multicritères", items }],
+  }, criteria);
+}
+
+async function fetchAdvancedSearch(criteria: AdvancedCriteria, strategy: SearchStrategy, signal: AbortSignal, onProgress?: (value: number) => void): Promise<SearchResult> {
+  const endpoint = (import.meta.env.VITE_OSINT_ADVANCED_SEARCH_PATH as string) || "/api/search/advanced";
+  const response = await apiFetch(endpoint, {
+    method: "POST",
+    body: JSON.stringify({ criteria, strategy, match: "AND" }),
+    signal,
+  });
+
+  if (response.ok) {
+    onProgress?.(90);
+    return normalizeAdvancedResult(await response.json(), criteria);
+  }
+
+  // Backward-compatible fallback for an older backend that only supports
+  // /api/search?query=...&type=.... It still enforces AND when records expose
+  // enough structured fields to prove every criterion.
+  if (response.status !== 404 && response.status !== 405) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `HTTP ${response.status}`);
+  }
+
+  const entries = Object.entries(criteria);
+  const results: Array<{ key: string; value: string; result: SearchResult }> = [];
+  for (let i = 0; i < entries.length; i++) {
+    const [key, value] = entries[i];
+    const result = await fetchSearchForCriterion(key, value, strategy, signal);
+    results.push({ key, value, result });
+    onProgress?.(20 + Math.round(((i + 1) / entries.length) * 70));
+  }
+
+  return intersectAdvancedResults(results, criteria);
 }
 
 function DatabasesView() {
