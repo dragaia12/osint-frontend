@@ -797,12 +797,12 @@ function SearchView({
                     <span className="id-label">Cible analysée</span>
                     <strong className="id-name">{activeResult.identity_card.name || [getItemField(activeResult.identity_card, "prenom"), getItemField(activeResult.identity_card, "nom")].filter(Boolean).join(" ") || activeResult.query}</strong>
                     <div className="identity-priority-fields">
-                      {[
+                      {([
                         ["Nom", getItemField(activeResult.identity_card, "nom")],
                         ["Prénom", getItemField(activeResult.identity_card, "prenom")],
                         ["Date de naissance", getItemField(activeResult.identity_card, "date_naissance")],
                         ["Ville", getItemField(activeResult.identity_card, "ville")],
-                      ].filter(([, value]) => value).map(([label, value]) => (
+                      ] as [string, unknown][]).filter(([, value]) => Boolean(value)).map(([label, value]) => (
                         <span key={String(label)}><b>{label}</b>{String(value)}</span>
                       ))}
                     </div>
