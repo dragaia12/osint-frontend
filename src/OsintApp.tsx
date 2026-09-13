@@ -228,6 +228,12 @@ function getStrongIdentityTokens(item: any): string[] {
   return Array.from(new Set(tokens));
 }
 
+function getItemIdentity(item: any): string {
+  const tokens = getStrongIdentityTokens(item);
+  if (tokens.length) return tokens.slice().sort().join("|");
+  return `none:${JSON.stringify(item)}`;
+}
+
 function mergeResultItems(items: any[]): any[] {
   if (!items.length) return [];
 
@@ -1349,12 +1355,12 @@ function ResultRow({ item }: { item: ResultItem }) {
   const birthDate = getItemField(item, "date_naissance");
   const city = getItemField(item, "ville");
   const identity = [firstName, lastName].filter(Boolean).join(" ") || item.username || item.email || item.ip || item.subdomain || item.note || item.description || "Signal détecté";
-  const priority = [
+  const priority = ([
     ["Nom", lastName],
     ["Prénom", firstName],
     ["Date de naissance", birthDate],
     ["Ville", city],
-  ].filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
+  ] as Array<[string, unknown]>).filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "");
 
   return (
     <div className="result-row">
