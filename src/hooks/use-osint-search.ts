@@ -199,31 +199,11 @@ function getSource(row: Row): string {
 }
 
 // ============================================================================
-// DEDUPLICATION
-// ============================================================================
-
-function deduplicateRows(rows: Row[]): Row[] {
-  const seen = new Set<string>();
-  const output: Row[] = [];
-  for (const row of rows) {
-    const key = stableStringify(row);
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    output.push(row);
-  }
-  return output;
-}
-
-// ============================================================================
 // CREATE ITEM
 // ============================================================================
 
 function createItem(row: Row, source: string): ResultItem {
-  // Créer un objet avec toutes les propriétés nécessaires
   const item: ResultItem = {
-    // Propriétés requises par ResultItem
     platform: toText(row.platform) || source,
     category: toText(row.category) || "backend",
     source: toText(row.source) || source,
@@ -233,9 +213,7 @@ function createItem(row: Row, source: string): ResultItem {
     trust_level: (toText(row.trust_level) as ResultItem["trust_level"]) || "VERIFIED",
   };
 
-  // Ajouter toutes les propriétés supplémentaires de la ligne
   for (const [key, value] of Object.entries(row)) {
-    // Ne pas écraser les propriétés déjà définies
     if (!(key in item)) {
       (item as Record<string, unknown>)[key] = value;
     }
@@ -254,14 +232,12 @@ function buildSearchResult(
 ): SearchResult {
   const inputType = manualType ?? detectEntityType(query);
 
-  // Normaliser et créer les items
   const completeItems: ResultItem[] = rows.map((originalRow) => {
     const row = normalizeRow(originalRow);
     const source = getSource(row);
     return createItem(row, source);
   });
 
-  // Dédupliquer
   const seen = new Set<string>();
   const uniqueItems: ResultItem[] = [];
   for (const item of completeItems) {
@@ -272,7 +248,6 @@ function buildSearchResult(
     }
   }
 
-  // Calculer les statistiques de confiance
   let verified = 0;
   let probable = 0;
   let candidate = 0;
@@ -288,7 +263,6 @@ function buildSearchResult(
     }
   }
 
-  // Construire les sections
   const sections: ResultSection[] = [];
   if (uniqueItems.length > 0) {
     sections.push({
@@ -319,6 +293,24 @@ function buildSearchResult(
     graph,
   };
 }
+
+// ============================================================================
+// CONVERSION PUBLIQUE (utilisée aussi par la recherche avancée)
+// ============================================================================
+
+export function toSearchResult(data: unknown, query: string, type?: EntityType): SearchResult {
+  // Déjà au bon format (sections[].items non vides)
+  if (
+    isRecord(data) &&
+    Array.isArray(data.sections) &&
+    data.sections.some((s: any) => Array.isArray(s?.items) && s.items.length)
+  ) {
+    return data as unknown as SearchResult;
+  }
+  return buildSearchResult(query, extractRows(data), type);
+}
+
+export { BACKEND_URL };
 
 // ============================================================================
 // API FETCH
