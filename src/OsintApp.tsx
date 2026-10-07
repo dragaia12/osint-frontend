@@ -9,7 +9,7 @@ import {
   createDossier, ensureRole, getAdminData, getDashboardData,
   getDossiers, removeDossier, saveSearchResult, toggleDossier,
 } from "@/lib/osint-data";
-import { useSearch as useOsintSearch } from "@/hooks/use-osint-search";
+import { useSearch as useOsintSearch, toSearchResult, BACKEND_URL } from "@/hooks/use-osint-search";
 import LogAccordionList from "./components/LogAccordionList";
 import type { Dossier, Graph, GraphNode, GraphEdge, ResultItem, SearchResult, SearchStrategy, TrustLevel, UserRole, EntityType } from "@/types/osint";
 
@@ -176,11 +176,25 @@ function advancedCriteriaToQuery(criteria: AdvancedCriteria): string {
     .join(" · ");
 }
 
+// Lecture d'un champ : insensible à la casse et aux accents,
+// et lit aussi item.data, item.raw (objet) et le JSON de item.source_data.
 function getItemField(item: any, key: string): unknown {
-  if (item?.[key] !== undefined && item?.[key] !== null) return item[key];
-  if (item?.data?.[key] !== undefined && item?.data?.[key] !== null) return item.data[key];
-  if (item?.raw && typeof item.raw === "object" && item.raw?.[key] !== undefined) return item.raw[key];
-  return undefined;
+  const wanted = normalizeSearchText(key);
+  const lookup = (obj: any): unknown => {
+    if (!obj || typeof obj !== "object") return undefined;
+    if (obj[key] !== undefined && obj[key] !== null && obj[key] !== "") return obj[key];
+    const k = Object.keys(obj).find((x) => normalizeSearchText(x) === wanted);
+    return k && obj[k] !== null && obj[k] !== "" ? obj[k] : undefined;
+  };
+  let v = lookup(item) ?? lookup(item?.data) ?? lookup(item?.raw);
+  if (v === undefined && typeof item?.source_data === "string") {
+    try {
+      v = lookup(JSON.parse(item.source_data));
+    } catch {
+      /* pas du JSON */
+    }
+  }
+  return v;
 }
 
 function collectItemValues(item: any, keys: string[]): string[] {
@@ -337,7 +351,7 @@ function normalizeAdvancedResult(result: any, criteria: AdvancedCriteria): Searc
     prenom: existingIdentity.prenom || getItemField(identitySource, "prenom"),
     date_naissance: existingIdentity.date_naissance || getItemField(identitySource, "date_naissance"),
     ville: existingIdentity.ville || getItemField(identitySource, "ville"),
-    confidence_summary: existingIdentity.confidence_summary || {
+    confidence_summary: {
       verified: items.filter((i) => i?.trust_level === "VERIFIED").length,
       probable: items.filter((i) => i?.trust_level === "PROBABLE").length,
       candidate: items.filter((i) => i?.trust_level === "CANDIDATE").length,
@@ -371,6 +385,7 @@ function normalizeAdvancedResult(result: any, criteria: AdvancedCriteria): Searc
     query,
     identity_card,
     sections: rebuiltSections,
+    total_results: items.length,
   } as SearchResult;
 }
 
@@ -482,7 +497,7 @@ function SearchView({
   const activeResult = advancedResult ?? search.result;
   const activeInProgress = advancedInProgress || search.inProgress;
   const activeProgress = advancedInProgress ? advancedProgress : search.progress;
-  const hasActivity = activeInProgress || Boolean(activeResult);
+  const hasActivity = activeInProgress || Boolean(activeResult) || Boolean(advancedError);
   const searchStartRef = useRef<number>(0);
   const savedRef = useRef<string>("");
 
@@ -504,6 +519,9 @@ function SearchView({
     e?.preventDefault();
     const filled = Object.keys(advancedCriteria).length;
     if (!filled || activeInProgress) return;
+
+    // Efface l'ancien état de la recherche rapide (évite le "50 résultats" périmé)
+    search.reset();
 
     advancedAbortRef.current?.abort();
     const controller = new AbortController();
@@ -576,8 +594,8 @@ function SearchView({
       if (!localFilter.trim()) return true;
       const q = localFilter.toLowerCase().trim();
       const val = getRowValue(item).toLowerCase();
-      const src = (item.source_data || item.platform || "").toLowerCase();
-      const raw = (item.raw || "").toLowerCase();
+      const src = String(item.source_data || item.platform || "").toLowerCase();
+      const raw = String(item.raw || "").toLowerCase();
       const type = getRowType(item).toLowerCase();
       return val.includes(q) || src.includes(q) || raw.includes(q) || type.includes(q);
     });
@@ -738,11 +756,17 @@ function SearchView({
           <div className="results-flow">
             <div className="progress-glass" aria-live="polite">
               <div className="progress-header">
-                <span>{advancedInProgress ? "Recherche multicritère · consolidation des résultats" : (search.progressLabel || "Initialisation des modules")}</span>
-                <strong>{activeProgress}%</strong>
+                <span>
+                  {advancedInProgress
+                    ? "Recherche multicritère · consolidation des résultats"
+                    : advancedResult
+                      ? `${advancedResult.total_results ?? allItems.length} résultat(s) trouvé(s)`
+                      : (search.progressLabel || "Initialisation des modules")}
+                </span>
+                <strong>{advancedResult && !advancedInProgress ? 100 : activeProgress}%</strong>
               </div>
-              <div className="progress-track"><span style={{ width: `${activeProgress}%` }} /></div>
-              {!advancedInProgress && Object.keys(search.toolChips).length > 0 && (
+              <div className="progress-track"><span style={{ width: `${advancedResult && !advancedInProgress ? 100 : activeProgress}%` }} /></div>
+              {!advancedInProgress && !advancedResult && Object.keys(search.toolChips).length > 0 && (
                 <div className="tool-stream">
                   {Object.entries(search.toolChips).map(([tool, status]) => (
                     <span key={tool} data-status={status}>{normalizeName(tool)}</span>
@@ -798,23 +822,23 @@ function SearchView({
             {activeResult && (
               <div className="result-controls-bar">
                 <div className="view-mode-toggle">
-                  <button 
+                  <button
                     type="button"
-                    className={`btn btn-sm ${viewMode === "table" ? "btn-gold" : "btn-glass"}`} 
+                    className={`btn btn-sm ${viewMode === "table" ? "btn-gold" : "btn-glass"}`}
                     onClick={() => setViewMode("table")}
                   >
                     Vue Tableau
                   </button>
-                  <button 
+                  <button
                     type="button"
-                    className={`btn btn-sm ${viewMode === "sections" ? "btn-gold" : "btn-glass"}`} 
+                    className={`btn btn-sm ${viewMode === "sections" ? "btn-gold" : "btn-glass"}`}
                     onClick={() => setViewMode("sections")}
                   >
                     Vue Groupée
                   </button>
-                  <button 
+                  <button
                     type="button"
-                    className={`btn btn-sm ${viewMode === "accordion" ? "btn-gold" : "btn-glass"}`} 
+                    className={`btn btn-sm ${viewMode === "accordion" ? "btn-gold" : "btn-glass"}`}
                     onClick={() => setViewMode("accordion")}
                   >
                     Vue Accordéon
@@ -835,9 +859,9 @@ function SearchView({
 
                 <div className="table-filter-bar">
                   <Search size={14} className="filter-icon" />
-                  <input 
-                    type="text" 
-                    placeholder="Filtrer ces résultats localement (source, valeur, type...)" 
+                  <input
+                    type="text"
+                    placeholder="Filtrer ces résultats localement (source, valeur, type...)"
                     value={localFilter}
                     onChange={(e) => setLocalFilter(e.target.value)}
                     className="local-filter-input"
@@ -868,7 +892,7 @@ function SearchView({
                         </tr>
                       ) : (
                         filteredItems.map((item: any, idx: number) => {
-                          const src = item.source_data || item.platform || "Inconnue";
+                          const src = String(item.source_data || item.platform || "Inconnue");
                           const badgeClass = getSourceBadgeClass(src);
                           const typeLabel = getRowType(item);
                           const val = getRowValue(item);
@@ -1071,6 +1095,8 @@ function GraphView({ graph }: { graph: Graph }) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragging = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
+  // Déplacé avant le "return null" : les hooks doivent toujours être appelés dans le même ordre
+  const touchState = useRef<{ dist: number; zoom: number } | null>(null);
 
   const W = 900, H = 580;
 
@@ -1102,8 +1128,6 @@ function GraphView({ graph }: { graph: Graph }) {
   }, [graph.nodes]);
 
   if (!graph.nodes.length) return null;
-
-  const touchState = useRef<{ dist: number; zoom: number } | null>(null);
 
   const onTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 1) {
@@ -1562,7 +1586,8 @@ interface DbStats {
   tables: { name: string; rows: number | null; columns: string[] }[];
 }
 
-const BACKEND_URL = (import.meta.env.VITE_OSINT_BACKEND_URL as string) || "";
+// BACKEND_URL est maintenant importé depuis "@/hooks/use-osint-search"
+// (même URL que la recherche rapide, avec la valeur par défaut du hook).
 
 async function apiFetch(path: string, options?: RequestInit): Promise<Response> {
   const { data } = await supabase.auth.getSession();
@@ -1603,7 +1628,8 @@ async function fetchSearchForCriterion(key: string, value: string, strategy: Sea
     const detail = await response.text().catch(() => "");
     throw new Error(detail || `HTTP ${response.status}`);
   }
-  return response.json();
+  // Convertit les lignes brutes du backend en { sections: [{ items }] }
+  return toSearchResult(await response.json(), value, type);
 }
 
 function itemMatchesCriterion(item: any, key: string, wanted: string): boolean {
@@ -1624,10 +1650,25 @@ function itemMatchesCriterion(item: any, key: string, wanted: string): boolean {
     crypto: ["crypto", "wallet", "address"],
     note: ["note", "description", "raw"],
   };
-  const wantedNorm = key === "telephone" ? normalizePhone(wanted) : key === "date_naissance" ? normalizeDate(wanted) : normalizeSearchText(wanted);
+  const norm = (v: unknown) =>
+    key === "telephone" ? normalizePhone(v) : key === "date_naissance" ? normalizeDate(v) : normalizeSearchText(v);
+
+  const wantedNorm = norm(wanted);
+  if (!wantedNorm) return true;
+
   const values = collectItemValues(item, aliases[key] || [key]);
+
+  // Aucune colonne reconnue : on cherche la valeur dans tout l'enregistrement
+  // plutôt que de rejeter la ligne (le backend a déjà filtré sur cette valeur).
+  if (values.length === 0) {
+    let blob = "";
+    try { blob = JSON.stringify(item); } catch { blob = ""; }
+    return norm(blob).includes(wantedNorm);
+  }
+
   return values.some((value) => {
-    const candidate = key === "telephone" ? normalizePhone(value) : key === "date_naissance" ? normalizeDate(value) : normalizeSearchText(value);
+    const candidate = norm(value);
+    if (!candidate) return false;
     return candidate === wantedNorm || candidate.includes(wantedNorm) || wantedNorm.includes(candidate);
   });
 }
@@ -1679,7 +1720,12 @@ async function fetchAdvancedSearch(criteria: AdvancedCriteria, strategy: SearchS
 
   if (response.ok) {
     onProgress?.(90);
-    return normalizeAdvancedResult(await response.json(), criteria);
+    const raw = await response.json();
+    // Accepte aussi bien { sections: [...] } que des lignes brutes (results/rows/data…)
+    return normalizeAdvancedResult(
+      toSearchResult(raw, advancedCriteriaToQuery(criteria)),
+      criteria
+    );
   }
 
   if (response.status !== 404 && response.status !== 405) {
@@ -2128,9 +2174,9 @@ export function OsintApp() {
 
       <main>
         {view === "search" && (
-          <SearchView 
-            strategy={strategy} 
-            setStrategy={setStrategy} 
+          <SearchView
+            strategy={strategy}
+            setStrategy={setStrategy}
             activeTables={activeTables}
             tablesLoading={tablesLoading}
             onRefreshTables={fetchActiveTables}
