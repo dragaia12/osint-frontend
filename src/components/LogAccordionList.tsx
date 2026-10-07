@@ -12,8 +12,9 @@ interface LogAccordionListProps {
 // ============================================================================
 // RÉSOLUTION DES CHAMPS D'IDENTITÉ
 // ============================================================================
-// Les colonnes brutes varient selon la base source (fr/en, snake_case…).
-// On tente plusieurs alias connus pour chaque emplacement de la fiche.
+// Les colonnes brutes varient selon la base source (fr/en, snake_case, accents,
+// majuscules…). La recherche de champ est insensible à la casse et aux accents,
+// et lit aussi le JSON éventuellement stocké dans `source_data`.
 // ============================================================================
 
 const FIELD_ALIASES: Record<string, string[]> = {
@@ -32,11 +33,41 @@ const FIELD_ALIASES: Record<string, string[]> = {
   organisme: ["organisme", "organization", "organisation", "source_org"],
 };
 
+function normKey(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+    .trim();
+}
+
+function getSources(item: any): any[] {
+  const list: any[] = [item];
+  if (item?.data && typeof item.data === "object") list.push(item.data);
+  if (item?.raw && typeof item.raw === "object") list.push(item.raw);
+  if (typeof item?.source_data === "string") {
+    try {
+      const parsed = JSON.parse(item.source_data);
+      if (parsed && typeof parsed === "object") list.push(parsed);
+    } catch {
+      /* pas du JSON */
+    }
+  }
+  return list;
+}
+
 function pick(item: any, keys: string[]): string | undefined {
+  const sources = getSources(item);
   for (const key of keys) {
-    const val = item[key];
-    if (val !== null && val !== undefined && String(val).trim() !== "") {
-      return String(val).trim();
+    const wanted = normKey(key);
+    for (const obj of sources) {
+      const realKey = Object.keys(obj).find((k) => normKey(k) === wanted);
+      if (!realKey) continue;
+      const val = obj[realKey];
+      if (val !== null && val !== undefined && typeof val !== "object" && String(val).trim() !== "") {
+        return String(val).trim();
+      }
     }
   }
   return undefined;
@@ -207,12 +238,12 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
 
             const isOpen = openIndices.has(idx);
             const primaryVal = item.email || item.username || item.ip || item.subdomain || item.domain || item.note || item.raw || "Signal";
-            
+
             // Récupère une source propre (ex: le nom de la table ou du fichier brut)
             const rawSource = item.sources?.[0] || item.source || item.source_data || item.platform || "base_locale";
             const sourceDb = String(rawSource).replace(/['"[\]]/g, "").trim();
 
-            // Détection intelligente du mot de passe (s'il est dans password, ou extrait du raw, ou de la note)
+            // Détection du mot de passe (champ password, ou extrait du raw)
             let revealedPassword = item.password || item.pass || item.pwd;
             if (!revealedPassword && item.raw && typeof item.raw === "string" && item.raw.includes(":")) {
               const parts = item.raw.split(":");
@@ -220,12 +251,12 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
             }
 
             return (
-              <div 
-                key={idx} 
-                style={{ 
-                  background: "var(--glass)", 
-                  border: "1px solid var(--border)", 
-                  borderRadius: "8px", 
+              <div
+                key={idx}
+                style={{
+                  background: "var(--glass)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "8px",
                   overflow: "hidden",
                   transition: "border-color 0.2s"
                 }}
@@ -261,7 +292,7 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                       </span>
                     )}
                     {item.trust_level && (
-                      <span className={`trust-badge trust-${item.trust_level.toLowerCase()}`} style={{ fontSize: "0.7rem" }}>
+                      <span className={`trust-badge trust-${String(item.trust_level).toLowerCase()}`} style={{ fontSize: "0.7rem" }}>
                         {item.trust_level}
                       </span>
                     )}
@@ -271,8 +302,7 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
 
                 {isOpen && (
                   <div style={{ padding: "14px", borderTop: "1px solid var(--border)", background: "rgba(0,0,0,0.25)", fontSize: "0.85rem", display: "flex", flexDirection: "column", gap: "12px" }}>
-                    
-                    {/* Mise en avant explicite du mot de passe s'il a pu être extrait */}
+
                     {revealedPassword && (
                       <div style={{ background: "rgba(234, 179, 8, 0.1)", border: "1px solid rgba(234, 179, 8, 0.3)", padding: "10px 12px", borderRadius: "6px" }}>
                         <span style={{ color: "var(--gold)", display: "flex", alignItems: "center", gap: "4px", fontSize: "0.75rem", marginBottom: "4px", fontWeight: 700 }}>
@@ -284,13 +314,12 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
                       </div>
                     )}
 
-                    {/* Grille dynamique pour toutes les propriétés restantes de l'objet */}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "10px" }}>
                       {Object.entries(item).map(([key, value]) => {
                         if (["sources", "source_data", "platform"].includes(key)) return null;
                         if (value === null || value === undefined || value === "" || value === false) return null;
-                        
-                        let displayVal = typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
+
+                        const displayVal = typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
 
                         return (
                           <div key={key} style={{ background: "rgba(0,0,0,0.3)", padding: "8px 10px", borderRadius: "6px", wordBreak: "break-all" }}>
