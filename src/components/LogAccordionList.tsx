@@ -138,6 +138,40 @@ function copyIdentityToClipboard(identity: ReturnType<typeof resolveIdentity>) {
   navigator.clipboard?.writeText(text).catch(() => {});
 }
 
+function ExtraIdentityFields({ item }: { item: any }) {
+  const knownKeys = new Set([
+    ...Object.values(FIELD_ALIASES).flat(),
+    ...IDENTITY_FIELD_SLOTS.map((slot) => slot.key),
+    "nom_complet", "filledCount", "sources", "source",
+    "source_data", "platform", "trust_level", "category"
+  ].map((key) => String(key).toLowerCase()));
+
+  const extraFields = Object.entries(item).filter(([key, value]) =>
+    !knownKeys.has(key.toLowerCase()) &&
+    value !== null && value !== undefined &&
+    value !== "" && value !== false
+  );
+
+  if (extraFields.length === 0) return null;
+
+  return (
+    <div style={{ padding: "0 1rem 1rem" }}>
+      <div style={{ fontSize: "0.72rem", fontWeight: 700, marginBottom: "8px" }}>
+        AUTRES CHAMPS DISPONIBLES
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px" }}>
+        {extraFields.map(([key, value]) => (
+          <div className="identity-field" key={key}>
+            <span className="identity-field-label">{key.replace(/_/g, " ").toUpperCase()}</span>
+            <span className="identity-field-value" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+              {typeof value === "object" ? JSON.stringify(value, null, 2) : String(value)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 function IdentityCard({ item, index }: { item: any; index: number }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -184,7 +218,8 @@ function IdentityCard({ item, index }: { item: any; index: number }) {
       </button>
 
       {open && (
-        <div className="identity-card-grid">
+        <>
+          <div className="identity-card-grid">
           {IDENTITY_FIELD_SLOTS.map((slot) => {
             const Icon = slot.icon;
             const value = (identity as any)[slot.key];
@@ -195,7 +230,9 @@ function IdentityCard({ item, index }: { item: any; index: number }) {
               </div>
             );
           })}
-        </div>
+          </div>
+          <ExtraIdentityFields item={item} />
+        </>
       )}
     </div>
   );
