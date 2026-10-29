@@ -143,7 +143,66 @@ function normalizeSearchText(value: unknown): string {
 }
 
 function normalizePhone(value: unknown): string {
-  return String(value ?? "").replace(/\D/g, "");
+  return formatDisplayValue(value).replace(/\D/g, "");
+}
+
+/**
+ * Convertit les valeurs de l'API en texte lisible sans afficher les objets
+ * JavaScript bruts ([object Object]) ni le JSON avec accolades.
+ * Les enveloppes courantes { value: ... } sont automatiquement déballées.
+ */
+function formatDisplayValue(input: unknown, depth = 0): string {
+  if (input === null || input === undefined) return "";
+  if (depth > 5) return "";
+
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+    if (!trimmed) return "";
+
+    // Certaines colonnes contiennent du JSON sérialisé sous forme de texte.
+    if ((trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+        (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+      try {
+        return formatDisplayValue(JSON.parse(trimmed), depth + 1);
+      } catch {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+
+  if (typeof input === "number" || typeof input === "boolean") return String(input);
+
+  if (Array.isArray(input)) {
+    return input
+      .map((entry) => formatDisplayValue(entry, depth + 1))
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  if (typeof input === "object") {
+    const obj = input as Record<string, unknown>;
+
+    // Format API fréquent : { value: "...", ...metadata }.
+    if (Object.prototype.hasOwnProperty.call(obj, "value")) {
+      const valueText = formatDisplayValue(obj.value, depth + 1);
+      if (valueText) return valueText;
+    }
+
+    // Pour les objets structurés, afficher les champs utiles sous forme lisible.
+    const ignoredKeys = new Set(["_id", "id", "raw", "source_data", "metadata"]);
+    const entries = Object.entries(obj)
+      .filter(([key, value]) => !ignoredKeys.has(key.toLowerCase()) && value !== null && value !== undefined && value !== "")
+      .map(([key, value]) => {
+        const formatted = formatDisplayValue(value, depth + 1);
+        return formatted ? `${normalizeName(key)} : ${formatted}` : "";
+      })
+      .filter(Boolean);
+
+    return entries.join(" · ");
+  }
+
+  return "";
 }
 
 function normalizeDate(value: unknown): string {
@@ -181,7 +240,7 @@ function advancedCriteriaToQuery(criteria: AdvancedCriteria): string {
 function getItemField(item: any, key: string): unknown {
   const wanted = normalizeSearchText(key);
   const lookup = (obj: any): unknown => {
-    if (!obj || typeof obj !== "object") return undefined;
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) return undefined;
     if (obj[key] !== undefined && obj[key] !== null && obj[key] !== "") return obj[key];
     const k = Object.keys(obj).find((x) => normalizeSearchText(x) === wanted);
     return k && obj[k] !== null && obj[k] !== "" ? obj[k] : undefined;
@@ -191,8 +250,11 @@ function getItemField(item: any, key: string): unknown {
     try {
       v = lookup(JSON.parse(item.source_data));
     } catch {
-      /* pas du JSON */
+      /* source_data est un nom de source, pas du JSON */
     }
+  }
+  if (v && typeof v === "object" && !Array.isArray(v) && "value" in v) {
+    return (v as Record<string, unknown>).value;
   }
   return v;
 }
@@ -459,6 +521,7 @@ function getRowValue(item: any) {
   const birthDate = getItemField(item, "date_naissance");
   const city = getItemField(item, "ville");
   return [fullName, birthDate, city, item.email, item.telephone || item.phone, item.username, item.ip, item.subdomain, item.domain, item.note, item.hash_val, item.hash]
+    .map((value) => formatDisplayValue(value))
     .filter(Boolean)
     .join(" · ") || "—";
 }
@@ -806,7 +869,7 @@ function SearchView({
                         ["Date de naissance", getItemField(activeResult.identity_card, "date_naissance")],
                         ["Ville", getItemField(activeResult.identity_card, "ville")],
                       ] as [string, unknown][]).filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "").map(([label, value]) => (
-                        <span key={label}><b>{label} :</b> {String(value)}</span>
+                        <span key={label}><b>{label} :</b> {formatDisplayValue(value)}</span>
                       ))}
                     </div>
                   </div>
@@ -1399,7 +1462,7 @@ function ResultRow({ item }: { item: ResultItem }) {
         {priority.length > 0 && (
           <div className="result-priority-fields">
             {priority.map(([label, value]) => (
-              <span key={label}><b>{label} :</b> {String(value)}</span>
+              <span key={label}><b>{label} :</b> {formatDisplayValue(value)}</span>
             ))}
           </div>
         )}
