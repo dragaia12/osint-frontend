@@ -201,11 +201,17 @@ function ExtraIdentityFields({ item }: { item: any }) {
   return (
     <div style={{ padding: "0 1rem 1rem" }}>
       <div style={{ fontSize: "0.72rem", fontWeight: 700, marginBottom: 8, color: "var(--gold)" }}>AUTRES CHAMPS DISPONIBLES</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))", gap: 6 }}>
         {unique.map(([key, value], i) => (
           <div className="identity-field" key={`${key}-${i}`}>
             <span className="identity-field-label">{key}</span>
-            <span className="identity-field-value" style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{value}</span>
+            {value.length > 180 ? <>
+              <span className="identity-field-value" style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{value.slice(0, 160)}…</span>
+              <details style={{ marginTop: 5 }}>
+                <summary style={{ cursor: "pointer", color: "var(--gold)", fontSize: "0.72rem" }}>Afficher le texte complet</summary>
+                <span className="identity-field-value" style={{ display: "block", marginTop: 5, overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{value}</span>
+              </details>
+            </> : <span className="identity-field-value" style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{value}</span>}
           </div>
         ))}
       </div>
@@ -247,12 +253,12 @@ function IdentityCard({ item, index }: { item: any; index: number }) {
       {open && (
         <>
           <div className="identity-card-grid">
-            {IDENTITY_FIELD_SLOTS.map(slot => {
+            {IDENTITY_FIELD_SLOTS.filter(slot => Boolean((identity as any)[slot.key])).map(slot => {
               const Icon = slot.icon;
-              const value = (identity as any)[slot.key];
-              return <div className="identity-field" key={slot.key}>
+              const value = (identity as any)[slot.key] as string;
+              return <div className="identity-field" key={slot.key} style={{ minWidth: 0, padding: "7px 9px" }}>
                 <span className="identity-field-label"><Icon size={12} /> {slot.label}</span>
-                <span className={`identity-field-value ${value ? "" : "empty"}`} style={{ overflowWrap: "anywhere" }}>{value || "—"}</span>
+                <span className="identity-field-value" style={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{value}</span>
               </div>;
             })}
           </div>
@@ -334,6 +340,36 @@ function GenericResultCard({ item, isOpen, onToggle }: { item: any; isOpen: bool
   );
 }
 
+function normalizePersonPart(value: string | undefined): string {
+  return (value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+}
+
+function getPersonGroupKey(item: any): string | undefined {
+  const identity = resolveIdentity(item);
+  const first = normalizePersonPart(identity.prenom);
+  const last = normalizePersonPart(identity.nom);
+  // On ne regroupe que si prénom ET nom sont présents et identiques après normalisation.
+  if (!first || !last) return undefined;
+  return `${last}|${first}`;
+}
+
+function GroupedIdentityCard({ items, index }: { items: any[]; index: number }) {
+  const [open, setOpen] = useState(false);
+  const identity = resolveIdentity(items[0]);
+  return <div className="identity-card" style={{ padding: 0, overflow: "hidden" }}>
+    <button type="button" className="identity-card-header" onClick={() => setOpen(v => !v)} aria-expanded={open} style={{ width: "100%" }}>
+      <span className="identity-chip identity-chip-index">#{index + 1}</span>
+      <span className="identity-card-name">{identity.nom_complet || "Identité regroupée"}</span>
+      <span className="identity-chip identity-chip-sources"><Users size={13} /> {items.length} résultats regroupés</span>
+      <span className="identity-header-spacer" />
+      <ChevronDown size={16} className={open ? "" : "collapsed"} />
+    </button>
+    {open && <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 8 }}>
+      {items.map((item, i) => <IdentityCard key={item?.id ?? `${getSourceLabel(item)}-${i}`} item={item} index={i} />)}
+    </div>}
+  </div>;
+}
+
 export default function LogAccordionList({ title, items }: LogAccordionListProps) {
   const [openIndices, setOpenIndices] = useState<Set<number>>(new Set());
   const toggle = (index: number) => setOpenIndices(previous => {
@@ -348,12 +384,31 @@ export default function LogAccordionList({ title, items }: LogAccordionListProps
     </div>
     <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
       {!items.length ? <p style={{ color: "var(--muted-foreground)", padding: "1rem", textAlign: "center" }}>Aucun résultat à afficher.</p> :
-        items.map((item, index) => {
-          const identity = resolveIdentity(item);
-          return identity.filledCount >= 2
-            ? <IdentityCard key={item?.id ?? index} item={item} index={index} />
-            : <GenericResultCard key={item?.id ?? index} item={item} isOpen={openIndices.has(index)} onToggle={() => toggle(index)} />;
-        })
+        (() => {
+          const groups: { key: string; items: any[] }[] = [];
+          const grouped = new Map<string, { key: string; items: any[] }>();
+          items.forEach((item, index) => {
+            const identity = resolveIdentity(item);
+            const personKey = getPersonGroupKey(item);
+            if (personKey) {
+              const existing = grouped.get(personKey);
+              if (existing) existing.items.push(item);
+              else {
+                const group = { key: `person-${personKey}-${index}`, items: [item] };
+                grouped.set(personKey, group);
+                groups.push(group);
+              }
+            } else groups.push({ key: `result-${item?.id ?? index}`, items: [item] });
+          });
+          return groups.map((group, index) => {
+            if (group.items.length > 1) return <GroupedIdentityCard key={group.key} items={group.items} index={index} />;
+            const item = group.items[0];
+            const identity = resolveIdentity(item);
+            return identity.filledCount >= 2
+              ? <IdentityCard key={group.key} item={item} index={index} />
+              : <GenericResultCard key={group.key} item={item} isOpen={openIndices.has(index)} onToggle={() => toggle(index)} />;
+          });
+        })()
       }
     </div>
   </div>;
