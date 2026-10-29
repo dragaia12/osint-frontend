@@ -190,7 +190,7 @@ function ExtraIdentityFields({ item }: { item: any }) {
     if (knownKeys.has(normKey(key)) || isHiddenKey(key) || value == null || value === "" || value === false) return [];
     return flattenFields(value, humanizeKey(key));
   });
-  const unique = Array.from(new Map(entries.map(([k, v]) => [`${normKey(k)}:${v}`, [k, v] as [string, string])).values());
+  const unique = Array.from(new Map(entries.map(([k, v]) => [`${normKey(k)}:${v}`, [k, v] as [string, string]])).values());
   if (!unique.length) return null;
   return (
     <div style={{ padding: "0 1rem 1rem" }}>
