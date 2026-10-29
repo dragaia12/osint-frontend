@@ -10,22 +10,28 @@ interface LogAccordionListProps {
 }
 
 const FIELD_ALIASES: Record<string, string[]> = {
-  nom: ["nom", "last_name", "lastname", "surname", "nom_famille"],
-  prenom: ["prenom", "first_name", "firstname", "given_name"],
+  nom: ["nom", "nom_1", "nom_2", "last_name", "lastname", "surname", "nom_famille"],
+  prenom: ["prenom", "prenom_1", "prenom_2", "prÃ©nom_1", "prÃ©nom_2", "first_name", "firstname", "given_name"],
   email: ["email", "mail", "e_mail"],
-  telephone: ["telephone", "phone", "tel", "mobile", "numero", "num_tel"],
-  naissance: ["naissance", "date_naissance", "birthdate", "dob", "date_of_birth"],
+  telephone: ["telephone", "téléphone domicile", "téléphone travail", "mobile personnel", "mobile travail", "phone", "tel", "mobile", "numero", "num_tel", "fax domicile", "fax travail"],
+  naissance: ["naissance", "né(e) le", "nÃ©(e) le", "date_naissance", "birthdate", "dob", "date_of_birth"],
   genre: ["genre", "gender", "sexe", "sex"],
-  adresse: ["adresse", "address", "street", "rue"],
-  ville: ["ville", "city", "commune"],
-  code_postal: ["code_postal", "zipcode", "postal_code", "cp"],
-  qualite: ["qualite", "civilite", "title", "statut"],
+  adresse: ["adresse", "voie-rue", "complément", "complÃ©ment", "lieu-dit", "address", "street", "rue"],
+  ville: ["ville", "bureau distributeur", "lieu de naissance", "pays ou dom-tom", "city", "commune"],
+  code_postal: ["code_postal", "code postal", "zipcode", "postal_code", "cp"],
+  qualite: ["qualite", "civilité", "civilitÃ©", "title", "statut"],
   nom_parent: ["nom_parent", "parent_nom", "parent_lastname"],
   prenom_parent: ["prenom_parent", "parent_prenom", "parent_firstname"],
   organisme: ["organisme", "organization", "organisation", "source_org"],
 };
 
-const HIDDEN_KEYS = new Set(["source_data", "raw_json", "debug", "traceback", "stack", "__typename"]);
+const HIDDEN_KEYS = new Set([
+  "source_data", "raw_json", "debug", "traceback", "stack", "__typename",
+  "display_fields", "semantic_fields", "provenance", "sources", "source_count",
+  "cross_source_matches", "source", "platform", "category", "trust_level",
+  "_source", "_match_type", "_score", "_matched_fields", "cached", "from_cache",
+  "elapsed_ms", "limit", "query", "type", "input_type", "identity_card", "stats",
+]);
 
 function normKey(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[\s-]+/g, "_").trim();
@@ -184,7 +190,7 @@ function ExtraIdentityFields({ item }: { item: any }) {
   const knownKeys = new Set([
     ...Object.values(FIELD_ALIASES).flat(), ...IDENTITY_FIELD_SLOTS.map(s => s.key),
     "nom_complet", "filledCount", "sources", "source", "source_data", "platform",
-    "trust_level", "category", "data", "raw", "value",
+    "trust_level", "category", "data", "raw", "value", "display_fields", "semantic_fields", "provenance", "_source", "_match_type", "_score", "_matched_fields", "source_count", "cross_source_matches", "elapsed_ms", "from_cache", "cached", "stats", "identity_card", "query", "input_type", "type", "limit",
   ].map(normKey));
   const entries = Object.entries(item || {}).flatMap(([key, value]) => {
     if (knownKeys.has(normKey(key)) || isHiddenKey(key) || value == null || value === "" || value === false) return [];
@@ -290,6 +296,7 @@ function GenericResultCard({ item, isOpen, onToggle }: { item: any; isOpen: bool
   const source = getSourceLabel(item);
   const primary = getPrimaryValue(item);
   const fields = flattenFields(item).filter(([key]) =>
+    !isHiddenKey(key) &&
     !["sources", "source data", "platform", "trust level", "raw", "data", "value"].includes(normKey(key))
   );
 
